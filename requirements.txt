@@ -1,0 +1,26 @@
+av>=16,<17
+braceexpand>=0.1,<1
+einops>=0.8,<1
+fire>=0.7,<1
+huggingface-hub>=1,<2
+kornia>=0.7,<1
+numpy>=2,<3
+omegaconf>=2.3,<3
+nvidia-ml-py>=13,<14
+onnxruntime-gpu>=1.23,<2
+opencv-python>=4.10,<5
+pillow>=10,<13
+pytorch-lightning>=2.3,<3
+roma>=1.5,<2
+safetensors>=0.5,<1
+scipy>=1.10,<2
+timm==0.9.12
+torch>=2.8,<2.9
+torchvision>=0.23,<0.24
+tqdm>=4.66,<5
+transformers>=5.1,<6
+typing-extensions>=4.10,<5
+wandb>=0.21,<1
+yacs>=0.1,<1
+
+./wheels/sageattention-2.2.0-cp311-cp311-linux_x86_64.whl ; sys_platform == "linux" and platform_machine == "x86_64"

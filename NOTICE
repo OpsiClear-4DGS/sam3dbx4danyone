@@ -1,0 +1,29 @@
+sam3dbx4danyone — SAM 3D Body × 4DAnyone
+
+Based on ant-research/4DAnyone, by the authors credited in README.md.
+Upstream source revision: 4f66efeea83c641ef7c57da7df9c33c4f3c726e4.
+This adaptation's original additions and modifications use the GNU Affero
+General Public License, version 3 only (AGPL-3.0-only); see LICENSE.
+Inherited 4DAnyone code retains Apache License 2.0, copied at
+third_party/licenses/4DANYONE_LICENSE, and its original attribution.
+
+The browser interface and workflow additions are maintained in this project
+under AGPL-3.0-only; UI provenance is in fdanyone/space/UPSTREAM.md.
+Project modifications include SAM 3D Body preprocessing, foreground and
+generation optimizations, GPU job queues, expanded camera layouts and the
+interactive clip editor, body viewer and results gallery.
+
+Retained components keep their original copyright and license terms:
+- DiffSynth-Studio inference sources, including Tencent/MimicMotion-derived
+  pose-encoder material: Apache-2.0; provenance in fdanyone/vendor/diffsynth.
+- BiRefNet source/model: MIT.
+- SAM 3D Body, DINOv3, and Sapiens2-derived schema: separate Meta licenses.
+- MHR: Apache-2.0; model distribution terms are also recorded in the notices.
+- Default Wan2.2 Turbo adapter: CC BY-NC-SA 4.0 (noncommercial).
+- SageAttention: Apache-2.0, including the separately bundled binary wheel.
+- NVIDIA model distribution and TensorRT packages: their own model/software
+  agreements; not relicensed by this project's AGPL-3.0-only grant.
+
+See docs/THIRD_PARTY_NOTICES.md, docs/dependency_licenses.json and the license
+texts under third_party/licenses. Model weights are downloaded separately;
+this notice does not replace their terms or the licenses of dependencies.

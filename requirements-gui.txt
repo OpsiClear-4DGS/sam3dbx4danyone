@@ -1,0 +1,4 @@
+# Or use uv sync --extra trt --extra gui.
+fastapi>=0.141,<0.142
+uvicorn>=0.54,<0.55
+python-multipart>=0.0.32,<0.1

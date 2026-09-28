@@ -1,0 +1,81 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sam3dbx4danyone"
+version = "0.1.0"
+description = "SAM 3D Body and 4DAnyone multi-view video generation with an interactive Three.js workflow"
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+license = "AGPL-3.0-only"
+license-files = [
+    "LICENSE", "NOTICE", "docs/THIRD_PARTY_NOTICES.md",
+    "docs/dependency_licenses.json", "third_party/licenses/*",
+    "fdanyone/vendor/diffsynth/LICENSE",
+]
+dependencies = [
+    "av>=16,<17",
+    "braceexpand>=0.1,<1",
+    "einops>=0.8,<1",
+    "fire>=0.7,<1",
+    "huggingface-hub>=1,<2",
+    "kornia>=0.7,<1",
+    "numpy>=2,<3",
+    "omegaconf>=2.3,<3",
+    "nvidia-ml-py>=13,<14",
+    "opencv-python>=4.10,<5",
+    "onnxruntime-gpu>=1.23,<2",
+    "pillow>=10,<13",
+    "pytorch-lightning>=2.3,<3",
+    "roma>=1.5,<2",
+    "safetensors>=0.5,<1",
+    "sageattention==2.2.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "scipy>=1.10,<2",
+    "timm==0.9.12",
+    "torch>=2.8,<2.9",
+    "torchvision>=0.23,<0.24",
+    "tqdm>=4.66,<5",
+    "transformers>=5.1,<6",
+    "typing-extensions>=4.10,<5",
+    "wandb>=0.21,<1",
+    "yacs>=0.1,<1",
+]
+
+[project.optional-dependencies]
+gui = [
+    "fastapi>=0.141,<0.142",
+    "uvicorn>=0.54,<0.55",
+    "python-multipart>=0.0.32,<0.1",
+]
+trt = [
+    "cppimport>=22,<27",
+    "cupy-cuda12x>=13,<14",
+    "lief>=0.17,<1",
+    "ml-dtypes>=0.5,<1",
+    "nvidia-modelopt==0.46.0",
+    "onnx>=1.21,<1.22",
+    "onnx-graphsurgeon>=0.6.1,<1",
+    "onnxconverter-common>=1.16,<1.17",
+    "onnxscript>=0.5,<1",
+    "onnxslim>=0.1.76,<1",
+    "polygraphy>=0.49.22,<1",
+    "tensorrt-cu12==11.2.1.2",
+]
+
+[project.urls]
+Homepage = "https://github.com/OpsiClear-4DGS/sam3dbx4danyone"
+Repository = "https://github.com/OpsiClear-4DGS/sam3dbx4danyone"
+Upstream = "https://github.com/ant-research/4DAnyone"
+Paper = "https://arxiv.org/abs/2608.20335"
+
+[tool.setuptools.packages.find]
+include = ["fdanyone*"]
+
+[tool.uv.sources]
+sageattention = { path = "wheels/sageattention-2.2.0-cp311-cp311-linux_x86_64.whl" }
+
+[tool.setuptools.package-data]
+"fdanyone.vendor.diffsynth" = ["LICENSE", "UPSTREAM.md", "UPSTREAM.patch", "VENDORED_FILES.txt"]
+
+"fdanyone.space" = ["UPSTREAM.md", "static/*"]

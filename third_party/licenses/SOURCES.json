@@ -1,0 +1,61 @@
+{
+  "retrieved": "2026-09-27",
+  "files": [
+    {
+      "path": "third_party/licenses/SAM3D_BODY_LICENSE",
+      "source": "https://github.com/facebookresearch/sam-3d-body/blob/b5c765a0d89d789985e186d396315e7590887b94/LICENSE",
+      "sha256": "b3a5a0e2d973ab80e6610ccf1cffc40756050d0ace3cd4fec879b3ec290b2e9b"
+    },
+    {
+      "path": "third_party/licenses/DINOV3_LICENSE",
+      "source": "https://raw.githubusercontent.com/facebookresearch/dinov3/6876159a11b4df116f30f667f8c9888617df0751/LICENSE.md",
+      "sha256": "25d122eb8f5b880fd23c736fb6ea8018ee45c12237e00b8a86d14c653904999e"
+    },
+    {
+      "path": "third_party/licenses/MHR_LICENSE",
+      "source": "https://raw.githubusercontent.com/facebookresearch/MHR/d96fafa33bbf018647c70c3525e91f53e79d2a14/LICENSE",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "path": "third_party/licenses/TURBO_LORA_LICENSE.md",
+      "source": "https://raw.githubusercontent.com/quanhaol/Wan2.2-TI2V-5B-Turbo/77768551236ad110d68299cf1a7151c0c728bddb/LICENSE.md",
+      "sha256": "17b2442405956fe8457ef0e230cbc18ed2cb6444bc86c04b5d61b75df3518335"
+    },
+    {
+      "path": "third_party/licenses/SAGEATTENTION_LICENSE",
+      "source": "wheels/sageattention-2.2.0-cp311-cp311-linux_x86_64.whl!/sageattention-2.2.0.dist-info/licenses/LICENSE",
+      "sha256": "178f46f58127373d449565589a32c2b5b60c082934618c17b7ce6890c61ef394"
+    },
+    {
+      "path": "third_party/licenses/TENSORRT_LICENSE.txt",
+      "source": "tensorrt-cu12==11.2.1.2/tensorrt_cu12-11.2.1.2.dist-info/licenses/LICENSE.txt",
+      "sha256": "64bd290f0251405f783ba1d2e155c500542be69795e51147a1d9f11a57bda8cc"
+    },
+    {
+      "path": "third_party/licenses/GEMX_MODEL_CARD.md",
+      "source": "https://huggingface.co/nvidia/GEM-X/raw/5ccf5ca3746c3620aa4016114f069a5f6ae399cd/README.md",
+      "sha256": "bd8970a3abdc3eeb185600c9e59765abe01210be8a62db380f11d295e8518700"
+    },
+    {
+      "path": "third_party/licenses/GEMX_LICENSE",
+      "source": "https://huggingface.co/nvidia/GEM-X/raw/5ccf5ca3746c3620aa4016114f069a5f6ae399cd/LICENSE",
+      "sha256": "d1a7d615ab8eff4de143b1456f46dabf232f54daf0fcf9a70442bb6f637a9e95"
+    },
+    {
+      "path": "third_party/licenses/THREE_LICENSE",
+      "source": "https://registry.npmjs.org/three/-/three-0.186.1.tgz!/package/LICENSE",
+      "sha256": "8b378ebe60e2fe500158cb0ac71cb5e8b7d92953c2abcc63a0eb90499653b5bc"
+    },
+    {
+      "path": "third_party/licenses/IBM_PLEX_SANS_LICENSE",
+      "source": "https://registry.npmjs.org/@fontsource-variable/ibm-plex-sans/-/ibm-plex-sans-5.3.0.tgz!/package/LICENSE",
+      "sha256": "d0283623ef57e722fd0eb688a8041589670c608ab780cd3612d06ba6f153d3fd"
+    },
+    {
+      "path": "third_party/licenses/4DANYONE_LICENSE",
+      "source": "https://github.com/ant-research/4DAnyone/blob/4f66efeea83c641ef7c57da7df9c33c4f3c726e4/LICENSE",
+      "sha256": "1c706f0f86f34b3245bdd3f29cadc63aa81616c849bfc197fd4d116a9d90a218",
+      "retrieved": "2026-09-28"
+    }
+  ]
+}

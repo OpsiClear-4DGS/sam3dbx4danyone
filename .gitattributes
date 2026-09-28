@@ -1,0 +1,4 @@
+# Preserve license texts and pinned third-party snapshot checksums.
+LICENSE -text -whitespace
+third_party/licenses/** -text -whitespace
+fdanyone/vendor/diffsynth/UPSTREAM.patch -text -whitespace

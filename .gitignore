@@ -1,0 +1,41 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.venv/
+dist/
+build/
+*.egg-info/
+
+# Runtime artifacts and large assets
+outputs/
+/data/fdanyone/
+/data/e2e-*/
+/data/.download/
+/data/source/pexels/*.mp4
+/models/
+/checkpoints/
+*.safetensors
+*.ckpt
+*.pth
+*.pt
+*.onnx
+*.engine
+*.plan
+/uploads/
+/previews/
+/wandb/
+*.log
+
+# Local-only configuration
+.env
+.env.*
+!.env.example
+
+# Local agent state may contain private provenance.
+.claude/
+work/
