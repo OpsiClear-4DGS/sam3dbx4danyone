@@ -15,6 +15,28 @@ Source and wheel packages include this notice, the inventory and retained licens
 
 The project history starts with a single release snapshot. This does not change upstream authorship or licensing. Original upstream code, copyright and attribution remain under their existing terms. This project's modifications and new workflow code use AGPL-3.0-only. Modified inherited Python files carry a notice identifying the adaptation; vendored components retain their own provenance records.
 
+## FreeTimeGsVanilla training and player
+
+- Source: <https://github.com/OpsiClear-4DGS/FreeTimeGsVanilla>
+- Pinned submodule: `third_party/FreeTimeGsVanilla`, revision `f0535336c6bf1e353eac875e93fdde106d0ec48b`
+- License: GNU AGPL version 3, retained in the [submodule LICENSE](../third_party/FreeTimeGsVanilla/LICENSE).
+- The trainer and the FTGS player's parser and sorter are used directly from
+  that submodule. `fdanyone/space/static/gaussian-shaders.js` adapts the player's
+  `renderer.js` shaders for Three.js attributes, GLSL setup and the shared depth
+  buffer; its source revision and AGPL-3.0 attribution are retained in the file.
+  The integration and its browser worker use AGPL-3.0-only. The trainer
+  preserves straight RGBA and supervises foreground transparency during
+  training; the player parser and sorter remain unchanged.
+  Its CUDA/Python dependencies retain their respective terms and are installed
+  in a separate environment. The Python 3.11 dependency inventory in this project
+  does not describe that separate environment. No trainer weights are copied
+  into this repository. See [integration details](training.md).
+
+Brush (`ArthurBrussee/brush`, Apache-2.0), reviewed at
+`6378a76add3b93501abb55c2dc08d71688537679`, was a reference for transparent-alpha
+supervision, full-image alpha L1 and matching training backgrounds. The PyTorch
+implementation is original project code; no Brush source or assets are bundled.
+
 ## SAM 3D Body and MHR
 
 - Source: <https://github.com/facebookresearch/sam-3d-body>

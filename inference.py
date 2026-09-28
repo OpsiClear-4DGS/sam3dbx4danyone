@@ -31,6 +31,8 @@ def inference(
     motion_precision: str = "fp16",
     turbo: bool = True,
     compile_dit: bool = True,
+    train_4dgs: bool = False,
+    training_steps: int = 30_000,
 ) -> dict:
     """Generate synchronized target-view videos from one monocular video.
 
@@ -68,10 +70,19 @@ def inference(
         compile_dit: Compile bounded Turbo attention chunks in the full
             profile when at least 23 GiB is free. The VRAM cap remains 23 GiB.
             False selects the eager reference; queued videos reuse warmed code.
+        train_4dgs: Train a foreground FreeTimeGS scene after video generation.
+        training_steps: Optimizer steps for each independent 4DGS chunk.
     """
 
     from fdanyone.config import resolve_execution_profile
     from fdanyone.trt import normalize_motion_backend, normalize_trt_precision
+
+    if train_4dgs:
+        from fdanyone.reconstruction import check_runtime
+        from fdanyone.errors import ConfigurationError
+        if isinstance(training_steps, bool) or not isinstance(training_steps, int) or training_steps < 1:
+            raise ConfigurationError('training_steps must be a positive integer.')
+        check_runtime(probe=True)
 
     configure_inference_cpu_environment()
     execution = resolve_execution_profile(execution_profile)
@@ -88,7 +99,7 @@ def inference(
     # Keep model imports out of module scope so ``--help`` stays lightweight.
     from fdanyone.pipeline import run_pipeline
 
-    return run_pipeline(
+    result = run_pipeline(
         video_path=video_path,
         views_per_layer=views_per_layer,
         layer_pitches=layer_pitches,
@@ -110,6 +121,14 @@ def inference(
         turbo=turbo,
         compile_dit=compile_dit,
     )
+    if train_4dgs:
+        from fdanyone.reconstruction import train_result
+        result['training'] = train_result(result['result_dir'], model_dir=model_dir,
+            gpu_id=gpu_ids[0] if gpu_ids else 0, steps=training_steps)
+        if 'total_pipeline_elapsed_seconds' in result:
+            result['generation_pipeline_elapsed_seconds'] = result['total_pipeline_elapsed_seconds']
+            result['total_pipeline_elapsed_seconds'] += result['training']['elapsed_seconds']
+    return result
 
 
 def main() -> None:

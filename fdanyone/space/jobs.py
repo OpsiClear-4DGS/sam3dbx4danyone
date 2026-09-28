@@ -45,6 +45,17 @@ def _tree_bytes(directory):
     return total
 
 
+def has_generated_result(job):
+    """Keep successfully generated views accessible if downstream training fails."""
+    if job.get('status') == 'completed':
+        return True
+    if job.get('status') not in ('failed', 'cancelled') or not job.get('result_dir'):
+        return False
+    from fdanyone.reconstruction import training_status
+    return ((Path(job['result_dir'])/'metadata.json').is_file()
+            and training_status(job['result_dir']).get('status') in ('failed', 'cancelled'))
+
+
 def make_options(views, pitches, yaw, span, turbo, start_time, fps, seed):
     values = (views, yaw, span, seed)
     if any(isinstance(v, bool) or int(v) != v for v in values):
@@ -83,6 +94,9 @@ class JobManager:
             paths = [str(Path(p).expanduser().resolve()) for p in videos or []]
             if not paths or any(not Path(p).is_file() for p in paths):
                 raise ValueError('Choose at least one existing input video.')
+            if options.get('train_4dgs'):
+                from fdanyone.reconstruction import check_runtime
+                check_runtime(probe=True)
             directory = self.root / ('job-' + uuid.uuid4().hex[:12])
             directory.mkdir()
             request = dict(video_paths=paths, output_dir=str(directory/'results'),
@@ -125,7 +139,7 @@ class JobManager:
         report_path = directory/'results/streams_report.json'
         report = _read_json(report_path)
         jobs = report.get('jobs', [])
-        if not isinstance(jobs, list) or not jobs or any(not isinstance(j, dict) or j.get('status') != 'completed' for j in jobs):
+        if not isinstance(jobs, list) or not jobs or any(not isinstance(j, dict) or not has_generated_result(j) for j in jobs):
             return None
         request = _read_json(directory/'request.json')
         ui = _read_json(directory/'ui.json')
@@ -143,7 +157,9 @@ class JobManager:
             result = Path(job.get('result_dir', '')).resolve()
             if not result.is_relative_to(directory) or not result.is_dir():
                 continue
-            results.append({'directory': str(result), 'label': chunks[index]['label'] if index < len(chunks) else f'Video {index+1}'})
+            from fdanyone.reconstruction import training_status
+            results.append({'directory': str(result), 'label': chunks[index]['label'] if index < len(chunks) else f'Video {index+1}',
+                            'training': training_status(result).get('status')})
         return dict(id=directory.name, directory=str(directory), name=name,
                     completed_at=report_path.stat().st_mtime,
                     cameras=request.get('views_per_layer', 0)*len(request.get('layer_pitches', [])),
@@ -166,6 +182,23 @@ class JobManager:
     def completed_job(self, job_id):
         with self.lock:
             return self._completed(self.job_directory(job_id))
+
+    def training_results(self, job_id):
+        """Owned results with training state, including active/partial models."""
+        from fdanyone.reconstruction import training_status
+        with self.lock:
+            directory = self.job_directory(job_id)
+            jobs = _read_json(directory/'results/streams_report.json').get('jobs', [])
+            results = []
+            for index, job in enumerate(jobs):
+                if not isinstance(job, dict) or not job.get('result_dir'):
+                    continue
+                result = Path(job['result_dir']).resolve()
+                if result.is_relative_to(directory) and result.is_dir():
+                    status = training_status(result)
+                    if status:
+                        results.append({'chunk': index, 'directory': str(result), 'training': status})
+            return results
 
     def delete_completed(self, job_id):
         with self.lock:
@@ -205,6 +238,14 @@ class JobManager:
                     job['label'] = chunk['label']
                     job['source_start'] = chunk['start']
                     job['source_end'] = chunk['end']
+            from fdanyone.reconstruction import training_status
+            for job in data['jobs']:
+                training = training_status(job.get('result_dir', ''))
+                if training:
+                    job['training'] = training
+            active = [j['training'] for j in data['jobs'] if j.get('status') == 'running' and j.get('training')]
+            if active:
+                data['stage'] = 'training' if any(t['stage'] == 'training' for t in active) else 'preparing training views'
             paths = [self.directory/'launcher.log'] + [Path(j['log']) for j in data['jobs']]
             chunks = []
             for path in paths:

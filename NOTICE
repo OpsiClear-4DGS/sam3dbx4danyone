@@ -12,6 +12,15 @@ under AGPL-3.0-only; UI provenance is in fdanyone/space/UPSTREAM.md.
 Project modifications include SAM 3D Body preprocessing, foreground and
 generation optimizations, GPU job queues, expanded camera layouts and the
 interactive clip editor, body viewer and results gallery.
+The FreeTimeGsVanilla training adapter uses the pinned submodule at
+third_party/FreeTimeGsVanilla; its trainer and browser player retain their
+GNU AGPL version 3 license and original attribution (see its LICENSE/README).
+Its FTGS parser and sorter are reused directly; the shaders adapted for the
+integrated Three.js viewer retain their source revision and AGPL attribution
+in fdanyone/space/static/gaussian-shaders.js.
+Brush's transparent-alpha training mode was a methodological reference for
+foreground opacity supervision. No Brush code or assets are bundled; see
+docs/THIRD_PARTY_NOTICES.md for its source revision and attribution.
 
 Retained components keep their original copyright and license terms:
 - DiffSynth-Studio inference sources, including Tencent/MimicMotion-derived

@@ -1,0 +1,3 @@
+[submodule "third_party/FreeTimeGsVanilla"]
+	path = third_party/FreeTimeGsVanilla
+	url = https://github.com/OpsiClear-4DGS/FreeTimeGsVanilla.git

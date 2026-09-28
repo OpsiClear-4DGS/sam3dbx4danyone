@@ -196,6 +196,9 @@ def batch_inference(video_paths: list[str],
     for path in paths:
         if not path.is_file():
             raise ConfigurationError(f'Input video does not exist: {path}')
+    if inference_options.get('train_4dgs'):
+        from fdanyone.reconstruction import check_runtime
+        check_runtime(probe=True)
     import torch
     visible = [normalize_gpu_uuid(torch.cuda.get_device_properties(i).uuid)
                for i in range(torch.cuda.device_count())]

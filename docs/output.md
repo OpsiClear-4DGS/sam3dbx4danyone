@@ -38,11 +38,11 @@ data/
   Faces are zero-based triangle indices. The fitted MHR surface is untextured;
   older files may contain only keypoints.
 
-BiRefNet masks are computed once and shared by body inference and conditioning.
+Source BiRefNet masks are computed once and shared by body inference and conditioning.
 Source framing uses predicted in-frame landmarks; it does not claim independent
 occlusion evidence.
 
-All videos contain 121 frames, use the selected output FPS, and contain no
+All generated-view and skeleton videos contain 121 frames, use the selected output FPS, and contain no
 audio. Generated dense/proposal views are 704×1280; skeleton videos retain the
 canonical source raster so their projected coordinates remain exact.
 
@@ -54,4 +54,10 @@ skeleton videos remain compact intermediates.
 
 ## Downstream reconstruction
 
-Use the generated videos and `cameras.json` with an external reconstruction tool.
+Enable `--train_4dgs=True` to run the pinned FreeTimeGsVanilla submodule after
+generation. It adds `training/` with straight RGBA training frames, COLMAP cameras,
+mesh-derived initialization, checkpoints and `scene.ftgs.ply`; see
+[training](training.md). Generated views and camera metadata remain unchanged
+and can also be used with external reconstruction tools. Soft alpha supervises
+object opacity, including empty space; RGB and prediction use matching random
+backgrounds during optimization.

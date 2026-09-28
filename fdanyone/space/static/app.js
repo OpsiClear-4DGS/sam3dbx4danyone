@@ -26,6 +26,7 @@ function buttons() {
   $('resume-live').hidden=!running || followJob;$('resume-live').disabled=exporting || liveBusy || deletingJob;
   $('generate').hidden=running;
   $('views').disabled=submitting;$('mode').disabled=submitting;
+  $('output-kind').disabled=submitting || running;
   $('uploads').disabled=submitting || uploading;
   for(const button of document.querySelectorAll('#files button'))button.disabled=submitting || uploading;
   $('clip-editor').hidden=!editing;$('scene-card').hidden=editing;
@@ -35,7 +36,7 @@ function buttons() {
   document.body.classList.toggle('editing',editing);
   $('drop-zone').hidden=Boolean(videos.length);$('uploads').tabIndex=videos.length?-1:0;
   const total=clipReady?clipPlan.chunks.length*Number($('views').value):0;
-  $('generate').textContent=submitting?'Starting…':running?'Generating…':`Generate${total?` ${total} videos`:''}`;
+  $('generate').textContent=submitting?'Starting…':running?'Processing…':$('output-kind').value==='4dgs'?'Create 4D scene':`Generate${total?` ${total} videos`:''}`;
   $('delete-job').disabled=exporting || liveBusy || deletingJob;
   for(const control of document.querySelectorAll('.result-card button,.result-card select'))control.disabled=exporting || liveBusy || deletingJob || control.dataset.unavailable==='true';
 }
@@ -44,10 +45,12 @@ function renderBatch(report) {
   const failed=report.jobs.filter(j=>j.status==='failed').length;
   const total=report.jobs.length || report.planned_chunks || 0;
   $('batch-progress').hidden=report.status==='completed' || report.status==='idle';
-  $('batch-status').textContent=running?(report.jobs.length?'Generating':total>1?'Preparing clips':'Preparing video'):'Generation stopped';
+  const training=report.jobs.find(j=>j.status==='running' && j.training?.stage==='training')?.training;
+  $('batch-status').textContent=running?(report.stage==='training'?'Training 4D scene':report.stage==='preparing training views'?'Preparing training views':report.jobs.length?'Generating views':total>1?'Preparing clips':'Preparing video'):'Processing stopped';
   $('batch-meter').max=Math.max(1,total);
   if(running && (!report.jobs.length || total===1))$('batch-meter').removeAttribute('value');
   else $('batch-meter').value=done;
+  if(running && total===1 && training){$('batch-meter').max=training.steps;$('batch-meter').value=training.step;}
   $('batch-detail').hidden=total<=1;
   $('batch-detail').textContent=total>1?(report.jobs.length?`${done} of ${total} chunks complete${failed?` · ${failed} failed`:''}`
     :`${total} chunks queued`):'';
@@ -58,8 +61,9 @@ function settings() {
   const pitches=cameraPresets[Number($('views').value)];
   return {views:Number($('views').value)/pitches.length, pitches, yaw:0,
     span:360, turbo:$('mode').value === 'turbo', start_time:0,
-    fps:'auto', seed:42};
+    fps:'auto', seed:42, train_4dgs:$('output-kind').value==='4dgs'};
 }
+$('output-kind').onchange=buttons;
 function showUploads() {
   $('files').replaceChildren();
   for (const video of videos) {
@@ -344,6 +348,7 @@ $('mode').onchange=()=>{$('model-menu').open=false;};
 $('views').onchange=()=>{updateCameraHint();buttons();requestLayoutPreview();};
 updateCameraHint();
 async function showScene(scene, urls = [], preserve = false) {
+  if(!preserve){trainingWatch=null;liveDirectory='';}
   await viewerReady;
   if(!preserve) $('camera').replaceChildren(...scene.cameras.map((c,i)=>new Option(String(c.camera_id).padStart(2,'0'),String(i))));
   $('scene-card').classList.toggle('layout-preview',scene.frames===1 && !urls.length);
@@ -353,14 +358,29 @@ async function showScene(scene, urls = [], preserve = false) {
   if(editing)viewer.setPlaying(false);
   $('scene-count').textContent=scene.cameras.length?`${scene.cameras.length} views${scene.frames>1?` · ${(scene.frames/scene.fps).toFixed(2)}s`:''}`:'';
   $('show-body').disabled=!scene.mesh && !scene.keypoints;
+  $('show-body').checked=viewer.body.visible;
   $('show-videos').disabled=!urls.some(Boolean);
 }
 $('scene-play').onclick = () => viewer?.setPlaying(!viewer.playing);
 $('timeline').oninput = event => { const frame=Number(event.target.value); viewer?.setPlaying(false); viewer?.seek(frame); };
 $('scene-reset').onclick = () => viewer?.home();
 $('scene-fullscreen').onclick = () => {if(document.fullscreenElement)document.exitFullscreen();else $('scene-card').requestFullscreen().catch(e=>message(e.message,true));};
-for(const [id,group] of [['show-grid','grid'],['show-cameras','rig'],['show-body','body'],['show-videos','planes']]) {
-  $(id).onchange = event => {if(viewer)viewer[group].visible=event.target.checked;};
+for(const [id,group] of [['show-grid','grid'],['show-cameras','rig'],['show-body','body'],['show-videos','planes'],['show-4d','gaussians']]) {
+  $(id).onchange = event => {if(viewer){viewer[group].visible=event.target.checked;viewer.requestRender();if(group==='body')viewer.bodyVisibilityChanged=true;}};
+}
+let trainingWatch=null,liveDirectory='',trainingPollBusy=false,loadedTraining=null;
+function updateTraining(info) {
+  trainingWatch=info?.status==='running'?info.watch:null;
+  viewer?.setTraining(info);
+  if(loadedTraining?.live)trainingNote(info);
+}
+function trainingNote(info) {
+  if(!loadedTraining)return;
+  $('scene-note').hidden=!loadedTraining.live;
+  if(loadedTraining.live){
+    const state=info?.status==='failed'||info?.status==='cancelled'?'Training stopped':'Training preview';
+    $('scene-note').textContent=`${state} · step ${loadedTraining.preview_step.toLocaleString()}${state==='Training preview'?' · updates automatically':''}`;
+  }
 }
 $('active-job').onchange=()=>{liveVersion='';autoOpenedBatch=undefined;followJob=true;explicitInitialResult=false;buttons();};
 $('resume-live').onclick=()=>{followJob=true;explicitInitialResult=false;liveVersion='';autoOpenedBatch=undefined;pendingLayout=null;buttons();void poll();};
@@ -376,6 +396,10 @@ async function updateLive(report) {
       markGallerySelection();
       liveVersion=result.version; $('scene-note').hidden=false; $('scene-note').textContent=result.note.replace('SAM body ready','Body tracking ready').replace('generated cameras','views');
       message('');
+    }
+    if(followJob&&index===($('active-job').value||'0')) {
+      if(result.directory)liveDirectory=result.directory;
+      if(result.training)updateTraining(result.training);
     }
   } catch(e) { message(`Live preview: ${e.message}`,true); }
   finally {liveBusy=false; buttons(); flushLayoutPreview();}
@@ -463,6 +487,7 @@ function renderGallery() {
     job.results.forEach(result=>select.add(new Option(result.label,result.directory)));
     if(job.results.length>1){select.className='result-chunk';card.append(select);}
     card.setResult=result=>{
+      badge.textContent=result?.training==='completed'?'4D scene':result?.training==='failed'||result?.training==='cancelled'?`${job.cameras} views · training stopped`:`${job.cameras} views`;
       card.dataset.directory=result?.directory||'';select.value=result?.directory||'';
       open.setAttribute('aria-label',`Open ${job.name}${job.results.length>1?`, ${result?.label}`:''}, ${jobDate(job.completed_at)}`);
       placeholder.hidden=false;placeholder.textContent=result?.thumbnail?'Loading preview…':'Preview unavailable';image.hidden=!result?.thumbnail;image.style.opacity='0';
@@ -552,7 +577,8 @@ async function openResult(directory) {
   if(!directory.trim())throw Error('Choose a saved result.');
   message('Loading result…');
   const result = await api('/api/results/open',{directory:directory.trim()});
-  await showScene(result.scene,result.videos);
+  await showScene(result.scene,result.videos,directory===liveDirectory||directory===currentResult);
+  updateTraining(result.training);
   currentResult=result.directory||directory.trim();
   lastResult=currentResult;
   markGallerySelection();
@@ -593,6 +619,13 @@ async function poll() {
       }
     }
     void updateLive(report);
+    // Also follow training started from the CLI on an existing gallery result.
+    if(trainingWatch&&!trainingPollBusy&&(report.status!=='running'||!followJob)) {
+      const watch=trainingWatch;
+      trainingPollBusy=true;
+      void api(watch).then(info=>{if(trainingWatch===watch)updateTraining(info);})
+        .catch(()=>{}).finally(()=>{trainingPollBusy=false;});
+    }
   } catch(e) { $('connection').textContent='Reconnecting…';$('connection').hidden=false; }
 }
 async function initialize() {
@@ -612,12 +645,28 @@ async function initialize() {
         if(video)$('playback').append(video);else $('playback').textContent=viewer?.frames===1?'Camera layout preview':'This camera video is not ready yet.';
         $('download').hidden=!url;if(url)$('download').href=url;
       },
-      onError: text => message(text,true)
+      onError: text => message(text,true),
+      onTraining: state => {
+        if(state.cleared){
+          loadedTraining=null;$('show-4d-label').hidden=true;$('show-4d').disabled=true;$('show-4d').checked=true;$('download-model').hidden=true;
+        } else if(state.loaded&&!state.error){
+          loadedTraining=state.info;
+          $('show-4d-label').hidden=false;$('show-4d').disabled=false;
+          $('show-body').checked=viewer.body.visible;
+          $('download-model').hidden=false;$('download-model').href=state.info.model;
+          trainingNote(state.info);message('');
+        } else if(state.loading&&!loadedTraining){
+          $('scene-note').hidden=false;$('scene-note').textContent='Loading 4D scene…';
+        } else if(state.error){
+          $('scene-note').hidden=false;$('scene-note').textContent=loadedTraining?'Preview update unavailable; keeping the last model.':state.error;
+        }
+      }
     });
   })();
   viewerReady.catch(e=>{ message(`3D viewer could not start: ${e.message}`,true); });
   try {
     const config = await api('/api/config'); videos=config.videos.slice(0,1); showUploads();
+    if(!config.training_available){$('output-kind').value='videos';$('output-kind').options[0].disabled=true;$('output-kind').options[0].textContent='4D scene (setup required)';}
     explicitInitialResult=Boolean(config.output_dir);
     await poll();
     if(config.output_dir) await exportingAction(()=>openResult(config.output_dir));

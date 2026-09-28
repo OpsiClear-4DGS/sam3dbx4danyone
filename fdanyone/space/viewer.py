@@ -209,6 +209,19 @@ def export_layout(options):
 
 def live_preview(job, cache_dir, previous_version=''):
     """Read only completed preprocessing and muxed videos; never change GPU work."""
+    if job.get('result_dir'):
+        published = Path(job['result_dir'])
+        metadata = published/'metadata.json'
+        if metadata.is_file():
+            identity = f'{published}:{metadata.stat().st_mtime_ns}'
+            version = 'generated-' + hashlib.sha256(identity.encode()).hexdigest()[:24]
+            if version == previous_version:
+                return {'version': version, 'unchanged': True}
+            # Generation scratch is gone during the longer training stage.
+            # Keep the complete published views available for inspection.
+            scene, videos, _, _ = export_result(published, cache_dir)
+            return dict(version=version, scene=scene, videos=videos,
+                        note='Generated views ready. Preparing and training the 4D scene.')
     data = Path(job['request']).parent
     for scratch in sorted(data.glob('.sam3d-*')):
         prep = scratch/'preprocessing'

@@ -11,7 +11,7 @@
 <form id="settings" novalidate hidden>
 <div class="section-title"><label for="views">Cameras</label><details id="model-menu" class="editor-menu compact-menu"><summary aria-label="Generation options">⋯</summary><div class="editor-menu-content"><label for="mode">Model</label><select id="mode"><option value="turbo">Turbo</option><option value="base">Base</option></select></div></details></div><div class="field-line camera-field"><select id="views" required aria-label="Camera preset"><option value="6">6 cameras</option><option value="8">8 cameras</option><option value="12">12 cameras</option><option value="16">16 cameras</option><option value="18">18 cameras</option><option value="24">24 cameras</option><option value="36">36 cameras</option></select></div>
 
-<p id="camera-summary" class="hint"></p><button type="submit" id="generate" class="primary wide">Generate</button></form>
+<p id="camera-summary" class="hint"></p><label for="output-kind">Output</label><select id="output-kind"><option value="4dgs">4D scene</option><option value="videos">Multi-view videos</option></select><button type="submit" id="generate" class="primary wide">Generate</button></form>
 <section id="batch-progress" aria-label="Generation progress" hidden>
 <details id="batch-details"><summary><span id="batch-status" role="status"></span><span id="batch-detail"></span></summary><select id="active-job" aria-label="Preview chunk" hidden></select><pre id="logs" hidden></pre></details>
 <progress id="batch-meter" aria-label="Chunk generation progress"></progress><div class="batch-actions"><button id="resume-live" type="button" class="quiet" hidden>View live</button><button id="cancel" type="button" class="quiet danger">Stop</button></div></section>
@@ -46,7 +46,7 @@
 <section class="scene-card layout-preview" id="scene-card">
 <div class="scene-heading"><div class="scene-title"><button id="back-to-results" type="button" class="quiet" hidden>← Results</button><h2 id="scene-title">Your scene</h2><span id="scene-count"></span></div>
 <details id="display-menu" class="editor-menu compact-menu"><summary>Display <span aria-hidden="true">⌄</span></summary><div class="editor-menu-content">
-<label><input id="show-grid" type="checkbox" checked>Grid</label><label><input id="show-cameras" type="checkbox" checked>Cameras</label><label><input id="show-body" type="checkbox" checked aria-label="Body mesh">Body</label><label><input id="show-videos" type="checkbox" checked>Videos in cameras</label><div class="menu-divider"></div><button id="scene-reset" type="button">Reset view <kbd>R</kbd></button><button id="scene-fullscreen" type="button">Fullscreen</button>
+<label id="show-4d-label" hidden><input id="show-4d" type="checkbox" checked disabled>4D scene</label><label><input id="show-grid" type="checkbox" checked>Grid</label><label><input id="show-cameras" type="checkbox" checked>Cameras</label><label><input id="show-body" type="checkbox" checked aria-label="Body mesh">Body</label><label><input id="show-videos" type="checkbox" checked>Videos in cameras</label><div class="menu-divider"></div><button id="scene-reset" type="button">Reset view <kbd>R</kbd></button><button id="scene-fullscreen" type="button">Fullscreen</button><a id="download-model" download hidden>Download 4D model ↓</a>
 </div></details></div>
 <div class="scene-layout"><div class="scene-main"><div id="viewer"><div id="viewer-loading">Loading viewer…</div></div>
 <div class="navigation-hint">Drag to orbit · scroll to zoom</div></div>

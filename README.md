@@ -6,20 +6,21 @@
 [![CUDA 12.8](docs/assets/badges/cuda.svg)](wheels/README.md)
 [![Viewer: Three.js](docs/assets/badges/viewer.svg)](docs/ui.md)
 
-Generate synchronized multi-view videos from one person's input video using **SAM 3D Body + BiRefNet, four-step Turbo, and the full Wan VAE**. This project adapts [4DAnyone](https://github.com/ant-research/4DAnyone) with a SAM 3D Body preprocessing pipeline, a GPU job queue, and an interactive Three.js viewer.
+Generate synchronized multi-view videos from one person's input video using **SAM 3D Body + BiRefNet, four-step Turbo, and the full Wan VAE**, then train an animated Gaussian scene with **FreeTimeGsVanilla**. This project adapts [4DAnyone](https://github.com/ant-research/4DAnyone) with a SAM 3D Body preprocessing pipeline, a GPU job queue, and an interactive Three.js viewer.
 
 ![sam3dbx4danyone UI showing the results gallery, an animated SAM 3D Body mesh, an 18-camera rig with video planes, and the selected camera video](docs/assets/ui-screenshot.png)
 
 *The current viewer with an 18-camera generated result and its fitted SAM 3D Body mesh.*
 
-**Topics:** `sam-3d-body` · `birefnet` · `4danyone` · `multi-view-video` · `human-motion` · `threejs`
+**Topics:** `sam-3d-body` · `birefnet` · `4danyone` · `multi-view-video` · `human-motion` · `threejs` · `4d-gaussian-splatting` · `freetimegs`
 
 - Upload, trim with chunk snapping, choose 1×–4× speed, and generate 121-frame chunks.
 - Choose 6, 8, 12, 16, 18, 24 or 36 cameras with predefined elevation rings.
 - Inspect synchronized camera videos and the animated body mesh in 3D.
 - Browse and delete completed results in the gallery; process independent chunks across available GPUs.
+- Train foreground 4D Gaussian scenes with live previews and playback in the same 3D viewer.
 
-The output is calibrated multi-view video and fitted body geometry for downstream reconstruction. Chunks generate independently; this project does not train a 4D Gaussian scene or guarantee consistency between chunks. Expanded Turbo layouts are experimental.
+Choose calibrated multi-view videos or a trained foreground 4D Gaussian scene. Each chunk generates and trains independently; scenes are not stitched across chunks. Expanded Turbo layouts and reconstruction quality remain experimental.
 
 The default `full` mode keeps BF16 model weights, FP32 denoising state and lossless RGB output under a **23 GiB per-process limit**. SageAttention, bounded attention compilation, CPU thread budgeting and persistent GPU workers are enabled by default on the validated L40S setup. There is no tiny-VAE or FP8 path.
 
@@ -28,7 +29,7 @@ The default `full` mode keeps BF16 model weights, FP32 denoising state and lossl
 Python 3.11, NVIDIA CUDA GPUs, and `uv` are required. The bundled SageAttention wheel targets Linux x86_64, Torch 2.8/CUDA 12.8 and L40S; see [wheel compatibility](wheels/README.md) for other hardware.
 
 ```bash
-git clone https://github.com/OpsiClear-4DGS/sam3dbx4danyone.git
+git clone --recurse-submodules https://github.com/OpsiClear-4DGS/sam3dbx4danyone.git
 cd sam3dbx4danyone
 uv sync --extra trt
 .venv/bin/python scripts/download_model.py --turbo=True
@@ -38,6 +39,15 @@ uv sync --extra trt
 
 Missing pinned models download automatically when needed. TensorRT engines are built and validated locally for the installed GPU/toolchain. The default `motion_backend=auto` uses validated engines when available and otherwise falls back to CUDA ONNX Runtime. Use `--motion_backend=tensorrt` to require TensorRT. Engines can be rechecked with `scripts/validate_trt_engines.py --precision=fp16`.
 
+For 4DGS training, initialize the pinned [FreeTimeGsVanilla submodule](third_party/FreeTimeGsVanilla) and its separate environment:
+
+```bash
+git submodule update --init --recursive
+uv sync --locked --project third_party/FreeTimeGsVanilla
+```
+
+Training uses Python 3.12 and the submodule's dependencies; generation stays on Python 3.11 / NumPy 2. To reuse an existing training environment, set `FDANYONE_FREETIMEGS_PYTHON=/absolute/path/to/FreeTimeGsVanilla/.venv/bin/python`. See [training setup and data contract](docs/training.md).
+
 ## Interactive UI
 
 ```bash
@@ -46,6 +56,14 @@ uv sync --extra trt --extra gui
 ```
 
 Open `http://127.0.0.1:8080` to upload a video, trim and speed it up, split it into chunks, choose cameras, run the chunks across GPUs and inspect results in the Three.js camera scene adapted to SAM 3D Body. The interface uses plain HTML/JavaScript and FastAPI, with no Gradio. See [UI usage](docs/ui.md) for remote access and saved results.
+
+With the training environment installed, **4D scene** is the default UI output. **Create 4D scene** generates views, preserves their soft foreground alpha, and trains FreeTimeGS with explicit opacity supervision and matching random backgrounds. The model appears in the existing viewer during training and updates about every 30 seconds. Playback, cameras and the body mesh share one timeline; **Display** controls visibility and model download. Choose **Multi-view videos** to stop after generation. CLI generation remains opt-in for training:
+
+```bash
+.venv/bin/python inference.py --video_path=video.mp4 --train_4dgs=True
+# Or train an existing result without generating its videos again:
+.venv/bin/python train_4dgs.py --result_dir=data/fdanyone/video
+```
 
 ## Generate on every GPU
 
@@ -89,7 +107,7 @@ Each result contains `metadata.json`, `cameras.json`, preprocessing geometry, sk
 | Six views, one L40S | 7m03s | 20.71 GiB |
 | 24 cameras, seven L40S GPUs available | 7m26s | 21.21 GiB |
 
-These are individual runs, not throughput guarantees. Full-VAE decoding remains the largest single-GPU stage. See [performance and validation limits](docs/performance.md). Camera/video outputs remain usable by external reconstruction tools; this package focuses on generation.
+These are generation-only runs, not throughput guarantees; they exclude foreground dataset preparation and 4DGS training. Full-VAE decoding remains the largest single-GPU generation stage. See [performance and validation limits](docs/performance.md) and [training](docs/training.md).
 
 ## Maintenance
 

@@ -16,6 +16,12 @@ Each GPU keeps one worker alive for the queue. It retains one DiT in CPU memory 
 
 Workers default to up to eight CPU threads each, divided according to available CPU affinity and the number of active workers. Explicit OMP/MKL thread limits take precedence.
 
+With `--train_4dgs=True`, each slot also prepares foreground views and trains
+FreeTimeGS on its assigned GPU before taking the next input. The cached
+generation model is released before training; the next input reloads it.
+Training uses the pinned submodule's separate environment and does not inherit
+the generation allocator cap. See [4DGS training](training.md).
+
 ## Validation
 
 Scheduler tests cover GPU discovery, one-GPU isolation, concurrent jobs, queue reuse, failure handling and cancellation. Two real single-GPU jobs completed concurrently during validation. Eight simultaneous full-pipeline jobs have not been benchmarked. See [current performance measurements](performance.md).

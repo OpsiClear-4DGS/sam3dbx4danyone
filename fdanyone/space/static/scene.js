@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {BodyMesh} from '/static/body.js';
+import {GaussianScene} from '/static/gaussians.js';
 
 const Y = new THREE.Vector3(0,1,0);
 const color = rgb => new THREE.Color().setRGB(...rgb.map(v=>v/255),THREE.SRGBColorSpace);
@@ -17,8 +18,8 @@ function ready(video) {
 }
 
 export class SceneViewer {
-  constructor(host,{onTime,onSelect,onError}) {
-    this.host=host;this.onTime=onTime;this.onSelect=onSelect;this.onError=onError;
+  constructor(host,{onTime,onSelect,onError,onTraining=()=>{}}) {
+    this.host=host;this.onTime=onTime;this.onSelect=onSelect;this.onError=onError;this.dirty=true;
     this.renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});
     this.renderer.setPixelRatio(Math.min(devicePixelRatio,2));this.renderer.outputColorSpace=THREE.SRGBColorSpace;
     host.replaceChildren(this.renderer.domElement);this.renderer.domElement.tabIndex=0;
@@ -27,12 +28,24 @@ export class SceneViewer {
     this.scene.add(new THREE.HemisphereLight(0xffffff,0x39445b,2),light);
     this.camera=new THREE.PerspectiveCamera(45,1,.01,1000);
     this.controls=new OrbitControls(this.camera,this.renderer.domElement);this.controls.enableDamping=true;
+    this.controls.addEventListener('change',()=>{this.dirty=true;});
     this.controls.minDistance=.1;this.controls.maxDistance=100;this.controls.zoomToCursor=true;
     this.grid=new THREE.GridHelper(30,60,0x505050,0x333333);this.grid.position.y=-.025;this.scene.add(this.grid);
     this.rig=new THREE.Group();this.body=new THREE.Group();this.planes=new THREE.Group();this.scene.add(this.rig,this.body,this.planes);
+    this.onTraining=onTraining;
+    this.gaussians=new GaussianScene(this.renderer,state=>{
+      this.dirty=true;
+      if(state.loaded&&!state.error&&!this.has4d){
+        this.has4d=true;if(!this.bodyVisibilityChanged)this.body.visible=false;
+      }
+      host.dataset.model=state.loaded?'ready':this.has4d?'ready':state.loading?'loading':'error';
+      if(state.loaded&&state.info)host.dataset.modelVersion=state.info.version;
+      onTraining(state);
+    });
+    this.scene.add(this.gaussians);
     this.entries=[];this.pickables=[];this.playing=false;this.time=0;this.fps=25;this.frames=1;this.radius=3;this.selected=0;this.lastFrame=-1;
     this.home();
-    this.resize=new ResizeObserver(()=>{const {width,height}=host.getBoundingClientRect();if(!width||!height)return;this.renderer.setSize(width,height,false);this.camera.aspect=width/height;this.camera.updateProjectionMatrix();});this.resize.observe(host);
+    this.resize=new ResizeObserver(()=>{const {width,height}=host.getBoundingClientRect();if(!width||!height)return;this.renderer.setSize(width,height,false);this.camera.aspect=width/height;this.camera.updateProjectionMatrix();this.dirty=true;});this.resize.observe(host);
     this.raycaster=new THREE.Raycaster();this.raycaster.params.Line.threshold=.04;
     this.renderer.domElement.addEventListener('pointerdown',e=>this.down=[e.clientX,e.clientY]);
     this.renderer.domElement.addEventListener('pointerup',e=>{
@@ -54,7 +67,11 @@ export class SceneViewer {
     for(const e of this.entries){if(e.video){e.video.pause();e.video.removeAttribute('src');e.video.load();e.video.remove();}}
     this.entries=[];this.pickables=[];this.clearGroup(this.rig);this.clearGroup(this.body);this.clearGroup(this.planes);this.lastFrame=-1;this.time=0;
     this.bodyMesh=null;this.bones=null;this.joints=null;
+    this.gaussians.clear();this.has4d=false;this.bodyVisibilityChanged=false;this.body.visible=true;this.gaussians.visible=true;
+    delete this.host.dataset.model;delete this.host.dataset.modelVersion;this.onTraining({cleared:true});
   }
+  setTraining(info) {this.gaussians.setSource(info);}
+  requestRender() {this.dirty=true;}
   async setScene(data,urls=[],preserve=false) {
     const oldTime=this.time,oldPlaying=this.playing;
     if(!preserve){this.clear();this.data=data;this.frames=data.frames;this.fps=data.fps;this.buildRig(data.cameras);this.buildBody();this.home();}
@@ -63,10 +80,12 @@ export class SceneViewer {
     for(let i=0;i<urls.length;i++) {
       const e=this.entries[i],url=urls[i];if(!url||!e||e.url===url)continue;
       const video=document.createElement('video');video.muted=true;video.playsInline=true;video.preload='auto';video.src=url;
+      video.addEventListener('seeked',()=>{this.dirty=true;});
       e.video=video;e.url=url;
       loads.push(ready(video).then(()=>{
         const texture=new THREE.VideoTexture(video);texture.colorSpace=THREE.SRGBColorSpace;
         e.plane.material.map?.dispose();e.plane.material.map=texture;e.plane.material.color.set(0xffffff);e.plane.material.opacity=1;e.plane.material.needsUpdate=true;
+        this.dirty=true;
         video.addEventListener('error',()=>{this.setPlaying(false);this.onError('Camera playback failed. Reopen this result.');});
       }));
     }
@@ -112,6 +131,7 @@ export class SceneViewer {
       if(this.bones)this.bones.visible=false;
       if(this.joints)this.joints.visible=false;
       this.lastFrame=-1;this.updateBody(Math.floor(this.time*this.fps));
+      this.dirty=true;
     } catch(e) {
       if(!signal.aborted)this.onError(`${e.message} Showing the skeleton instead.`);
     }
@@ -135,6 +155,7 @@ export class SceneViewer {
     this.camera.position.copy(center).add(new THREE.Vector3(1.15,.85,1.5).multiplyScalar(this.radius*1.5));this.controls.update();
   }
   selectCamera(index) {
+    this.dirty=true;
     this.selected=index;this.entries.forEach((e,i)=>e.lines.material.color.set(i===index?0xf09ad6:0xa0a0a0));this.onSelect(index,this.entries[index]?.video,this.entries[index]?.url);
   }
   async setPlaying(value) {
@@ -151,6 +172,7 @@ export class SceneViewer {
     this.notify();
   }
   seek(frame) {
+    this.dirty=true;
     this.time=Math.max(0,Math.min(this.frames-1,frame))/this.fps;
     for(const e of this.entries)if(e.video)e.video.currentTime=this.time;
     this.lastTick=performance.now();this.updateBody(Math.round(this.time*this.fps));this.notify();
@@ -167,7 +189,11 @@ export class SceneViewer {
       for(const v of clips.slice(1))if(!v.seeking&&Math.abs(v.currentTime-this.time)>1.5/this.fps)v.currentTime=this.time;
       this.updateBody(Math.min(this.frames-1,Math.floor(this.time*this.fps+1e-5)));this.notify();
     }
-    this.controls.update();this.renderer.render(this.scene,this.camera);
+    const moved=this.controls.update();this.camera.updateMatrixWorld();
+    this.gaussians.update(this.camera,Math.min(1,Math.max(0,this.time*this.fps/Math.max(1,this.frames-1))));
+    if(this.playing||moved||this.dirty||this.gaussians.dirty){
+      this.renderer.render(this.scene,this.camera);this.dirty=false;this.gaussians.dirty=false;
+    }
   }
   dispose() {this.renderer.setAnimationLoop(null);this.clear();this.resize.disconnect();this.controls.dispose();this.grid.geometry.dispose();this.grid.material.dispose();this.renderer.dispose();}
 }
