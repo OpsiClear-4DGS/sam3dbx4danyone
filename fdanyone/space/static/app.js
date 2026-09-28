@@ -2,12 +2,23 @@ import {buildFilmstrip} from '/static/filmstrip.js';
 import {previewClip, snapClipEnd} from '/static/clip-timeline.js';
 const $ = id => document.getElementById(id);
 let viewer, viewerReady, videos = [], uploading = false, exporting = false, running = false, liveBusy = false, liveVersion = '', pendingLayout = null;
-let editing=false, committedClip=null, filmstripAbort=null;
-let submitting=false, clipInfo=null, clipPlan=null, clipReady=false, planRevision=0, planTimer, previewBounds=null;
+let editing=false, filmstripAbort=null;
+let submitting=false, clipInfo=null, clipPlan=null, planRevision=0, planTimer, previewBounds=null;
 let completedJobs=[], resultPaths=[], refreshPromise=null, deletingJob=false, deleteTarget=null, currentResult='';
 const galleryChunks=new Map();
 let followJob=true, stopping=false, lastGalleryRefresh=0, gallerySignature='';
-let workflow='results', editorOrigin='results', workflowJob='', lastResult='';
+let workflow='results', workflowJob='';
+let activeJob=null, selectedStage='trim', activeTaskId='', saveTimer, saveRevision=0, jobDirty=false;
+let previewKey='', stageVersion='', previewLive=false, stagePreviewBusy=false, trainingAvailable=true, savePromise=Promise.resolve();
+const stageIds=['trim','pose','generate','splat'];
+const stageNames={trim:'Trim',pose:'Extract pose',generate:'Generate videos',splat:'Splat 4DGS'};
+const chosenRun=stage=>activeJob?.runs.find(r=>r.id===activeJob.selected[stage]);
+function versionLabel(run, index) {
+  const c=run.config;
+  const config=run.stage==='trim'?`${c.skip+1}× · ${c.start.toFixed(1)}–${c.end?.toFixed(1)||'end'}s`:run.stage==='pose'?c.precision.toUpperCase():run.stage==='generate'?`${c.views*c.pitches.length} cameras · seed ${c.seed}`:`${c.steps.toLocaleString()} steps · ${c.samples_per_keyframe.toLocaleString()} points`;
+  return `V${index+1} · ${config}${run.status!=='completed'?` · ${run.status}`:run.stale?' · earlier inputs':''}`;
+}
+
 let trimPointer=null, trimAlt=false, trimSnapped=false;
 const message = (text, error = false) => { $('message').textContent = text; $('message').classList.toggle('error', error); $('message').hidden=!text; };
 async function api(path, body, method) {
@@ -19,34 +30,167 @@ async function api(path, body, method) {
   return data;
 }
 function buttons() {
-  $('generate').disabled = submitting || uploading || running || !videos.length || !clipReady;
-  $('settings').hidden=!clipReady || editing;
-  $('clip-summary').hidden=!clipReady || editing;
-  $('cancel').disabled=!running || stopping; $('cancel').hidden=!running;
-  $('resume-live').hidden=!running || followJob;$('resume-live').disabled=exporting || liveBusy || deletingJob;
+  const controls=Boolean(activeJob) && workflow!=='results';
+  const busy=submitting || uploading || running;
+  const blocked=activeJob?.blocked?.[selectedStage];
+  $('job-panel').hidden=!controls;
+  $('files').hidden=!controls;
+  $('settings').hidden=!controls || selectedStage!=='generate';
+  $('pose-settings').hidden=!controls || selectedStage!=='pose';
+  $('splat-settings').hidden=!controls || selectedStage!=='splat';
+  $('generate').disabled=busy || !controls || Boolean(blocked) || (selectedStage==='trim' && !clipPlan) || (!trainingAvailable && $('run-through').value==='splat');
   $('generate').hidden=running;
-  $('views').disabled=submitting;$('mode').disabled=submitting;
-  $('output-kind').disabled=submitting || running;
-  $('uploads').disabled=submitting || uploading;
-  for(const button of document.querySelectorAll('#files button'))button.disabled=submitting || uploading;
+  $('cancel').disabled=!running || stopping;$('cancel').hidden=!running;
+  $('resume-live').hidden=!running || followJob;$('resume-live').disabled=exporting || liveBusy || deletingJob;
+  $('uploads').disabled=busy;
+  for(const control of document.querySelectorAll('#settings input,#settings select,#pose-settings select,#splat-settings input,#splat-settings select,#stage-version,#run-through'))control.disabled=busy;
+  $('stage-version').disabled=busy || exporting || stagePreviewBusy || liveBusy;
+  $('stage-chunk').disabled=exporting || stagePreviewBusy || liveBusy;
+  for(const button of $('pipeline-steps').children)button.disabled=submitting || uploading || exporting || stagePreviewBusy;
+  for(const control of document.querySelectorAll('#trim-start,#trim-end,#trim-start-range,#trim-end-range,#skip-frames,#reset-trim'))control.disabled=busy;
+  for(const button of document.querySelectorAll('#files button'))button.disabled=busy;
   $('clip-editor').hidden=!editing;$('scene-card').hidden=editing;
-  $('saved-results').hidden=workflow!=='results' || editing || uploading;
-  $('back-to-results').hidden=workflow==='results' || editing;
-  $('back-to-results').disabled=exporting || liveBusy || deletingJob || submitting || uploading;
+  $('saved-results').hidden=workflow!=='results' || uploading;
+  $('job-library').hidden=!controls;$('job-library').disabled=submitting || uploading || exporting;
+  $('active-task').hidden=!running || (controls && activeJob?.id===activeTaskId);
   document.body.classList.toggle('editing',editing);
-  $('drop-zone').hidden=Boolean(videos.length);$('uploads').tabIndex=videos.length?-1:0;
-  const total=clipReady?clipPlan.chunks.length*Number($('views').value):0;
-  $('generate').textContent=submitting?'Starting…':running?'Processing…':$('output-kind').value==='4dgs'?'Create 4D scene':`Generate${total?` ${total} videos`:''}`;
+  $('drop-zone').hidden=controls;$('uploads').tabIndex=controls?-1:0;
+  const end=$('run-through').value;
+  const verb=chosenRun(selectedStage)?'Rerun':'Run';
+  $('generate').textContent=submitting?'Starting…':end===selectedStage?`${verb} ${stageNames[selectedStage]}`:`${verb} ${stageNames[selectedStage]} → ${stageNames[end]}`;
+  $('run-note').textContent=blocked || (running?'Settings are saved. Wait or stop the active task to reconfigure.':chosenRun(selectedStage)?'Creates a new version. Earlier outputs stay available.':'');
+  $('use-chunks').disabled=busy || !clipPlan;
   $('delete-job').disabled=exporting || liveBusy || deletingJob;
   for(const control of document.querySelectorAll('.result-card button,.result-card select'))control.disabled=exporting || liveBusy || deletingJob || control.dataset.unavailable==='true';
 }
+function renderJob() {
+  if(!activeJob)return;
+  $('step-title').textContent=stageNames[selectedStage];
+  for(const button of $('pipeline-steps').children) {
+    const stage=button.dataset.stage, chosen=chosenRun(stage);
+    const pending=activeJob.runs.find(r=>r.stage===stage && ['running','queued'].includes(r.status));
+    const last=activeJob.runs.filter(r=>r.stage===stage).at(-1);
+    const state=pending?.status || (last && last.status!=='completed' && last.created_at>(chosen?.created_at||0)?last.status:chosen?.stale?'Earlier inputs':chosen?'Ready':'Not run');
+    button.querySelector('small').textContent=state[0].toUpperCase()+state.slice(1);
+    button.setAttribute('aria-current',String(stage===selectedStage));
+    button.classList.toggle('step-ready',Boolean(chosen) && !chosen.stale);
+  }
+  const runs=activeJob.runs.filter(r=>r.stage===selectedStage);
+  const options=runs.map((r,i)=>{const option=new Option(versionLabel(r,i),r.id);option.disabled=r.status!=='completed';return option;});
+  const signature=options.map(o=>`${o.value}:${o.textContent}`).join('|');
+  if($('stage-version').dataset.signature!==signature){$('stage-version').replaceChildren(...options);$('stage-version').dataset.signature=signature;}
+  $('stage-version').value=activeJob.selected[selectedStage]||'';
+  $('version-field').hidden=!runs.length;
+  const chosen=chosenRun(selectedStage), latest=runs.at(-1);
+  const previous=stageIds[stageIds.indexOf(selectedStage)-1], input=chosenRun(previous);
+  $('step-input').hidden=!input;
+  if(input)$('step-input').textContent=`Input: ${stageNames[previous]} · V${activeJob.runs.filter(r=>r.stage===previous).findIndex(r=>r.id===input.id)+1}`;
+  const notes={trim:'Choose the range and speed. Chunks keep every selected frame.',pose:'SAM 3D Body + BiRefNet. Reuse this pose with different camera layouts.',generate:'Choose cameras and generate synchronized views from the selected pose.',splat:'Train a foreground 4D scene from the selected videos. Export includes audio when available.'};
+  $('step-note').textContent=latest?.error || (chosen?.stale?'This output uses earlier inputs. Select its version to restore those inputs, or rerun this step.':notes[selectedStage]);
+  for(const option of $('run-through').options)option.disabled=stageIds.indexOf(option.value)<stageIds.indexOf(selectedStage) || (option.value==='splat'&&!trainingAvailable);
+  if(stageIds.indexOf($('run-through').value)<stageIds.indexOf(selectedStage))$('run-through').value=selectedStage;
+  const artifacts=(activeJob.runs.find(r=>r.stage===selectedStage && r.status==='running') || chosen)?.artifacts||[];
+  const prior=$('stage-chunk').value;
+  const chunkSignature=artifacts.map(a=>a.label).join('|');
+  if($('stage-chunk').dataset.signature!==chunkSignature){
+    $('stage-chunk').replaceChildren(...artifacts.map((a,i)=>new Option(a.label,String(i))));
+    $('stage-chunk').dataset.signature=chunkSignature;
+    if(Number(prior)<artifacts.length)$('stage-chunk').value=prior;
+  }
+  $('stage-chunk').hidden=artifacts.length<2;
+  buttons();
+}
+function applyConfigs() {
+  const config=activeJob.configs;
+  const count=config.generate.views*config.generate.pitches.length;
+  if(!$('views').querySelector(`option[value="${count}"]`))$('views').add(new Option(`${count} cameras`,String(count)));
+  $('views').value=String(count);$('mode').value=config.generate.turbo?'turbo':'base';
+  $('generation-seed').value=config.generate.seed;$('pose-precision').value=config.pose.precision;
+  $('training-steps').value=config.splat.steps;
+  if(!Array.from($('training-samples').options).some(o=>Number(o.value)===config.splat.samples_per_keyframe))$('training-samples').add(new Option(config.splat.samples_per_keyframe.toLocaleString(),String(config.splat.samples_per_keyframe)));
+  $('training-samples').value=String(config.splat.samples_per_keyframe);
+  if(clipInfo)setClipFields({...config.trim,end:config.trim.end??clipInfo.duration});
+  updateCameraHint();
+}
+function draftChanged(stage, values) {
+  if(!activeJob || running)return;
+  activeJob.configs[stage]={...activeJob.configs[stage],...values};
+  jobDirty=true;++saveRevision;clearTimeout(saveTimer);$('job-save').textContent='Saving…';
+  saveTimer=setTimeout(()=>{void saveDraft().catch(e=>message(e.message,true));},350);
+}
+async function saveDraft() {
+  clearTimeout(saveTimer);
+  if(!activeJob || !jobDirty)return savePromise;
+  const id=activeJob.id, revision=saveRevision, configs=structuredClone(activeJob.configs);
+  const request=savePromise.catch(()=>{}).then(()=>api(`/api/jobs/${id}`,{configs},'PATCH'));
+  savePromise=request;
+  try {
+    const saved=await request;
+    if(activeJob?.id===id && revision===saveRevision){activeJob=saved;jobDirty=false;$('job-save').textContent='Saved';renderJob();}
+  }catch(e){if(activeJob?.id===id && revision===saveRevision)$('job-save').textContent='Not saved';throw e;}
+}
+async function openJob(id, stage=null, directory='') {
+  if(running && id!==activeTaskId){if(directory)await openResult(directory);else message('Finish the active task before opening another job.');return;}
+  await saveDraft();clearTimeout(saveTimer);++saveRevision;jobDirty=false;
+  const job=await api(`/api/jobs/${id}`);
+  resetClip();activeJob=job;previewKey='';workflow='prepare';workflowJob=job.directory;
+  selectedStage=stage || job.active?.stage || (job.selected.splat?'splat':job.selected.generate?'generate':job.selected.pose?'pose':'trim');
+  videos=job.source.id?[job.source]:[];showUploads();applyConfigs();
+  if(videos.length)await loadClip();
+  followJob=Boolean(job.active);renderJob();
+  if(directory){const item=chosenRun(selectedStage)?.artifacts.findIndex(a=>a.result_dir===directory);if(item>=0)$('stage-chunk').value=String(item);}
+  await setStage(selectedStage);
+  localStorage.setItem('4danyone-job',id);
+}
+async function setStage(stage) {
+  if(!activeJob)return;
+  if(editing){$('source').pause();editing=false;}
+  selectedStage=stage;previewKey='';pendingLayout=null;
+  workflow='prepare';renderJob();
+  if(stage==='trim' && clipInfo){editing=true;previewBounds=clipEdit();buttons();return;}
+  if(stage==='trim'){message('The original upload is unavailable. Saved later steps can still be used.',true);return;}
+  if(chosenRun(stage)){await previewStage();return;}
+  if(stage==='generate'){requestLayoutPreview();return;}
+  const pose=chosenRun('pose');
+  if(stage==='splat' && chosenRun('generate')){await previewStage('generate');return;}
+  if(pose){await previewStage('pose');return;}
+  await showScene({cameras:[],frames:1,fps:25,keypoints:null,links:[],joint_ids:[],joint_colors:[]});
+  currentResult='';$('scene-title').textContent=stageNames[stage];$('scene-note').hidden=false;
+  $('scene-note').textContent=activeJob.blocked?.[stage]||'The result will appear here.';
+}
+async function previewStage(stage=selectedStage, run=null) {
+  const id=activeJob?.id, chosen=run || chosenRun(stage), context=selectedStage;
+  if(!id || !chosen)return;
+  const chunk=Number($('stage-chunk').value)||0;
+  const key=`${id}:${chosen.id}:${chunk}`;
+  const result=await api(`/api/jobs/${id}/stage?stage=${stage}&chunk=${chunk}&run=${chosen.id}&version=${encodeURIComponent(previewKey===key?stageVersion:'')}`);
+  if(activeJob?.id!==id || selectedStage!==context || workflow==='results' || result.pending || result.unchanged || !result.scene)return;
+  await showScene(result.scene,result.videos,previewKey===key);
+  updateTraining(result.training);previewKey=key;stageVersion=result.version||'';previewLive=Boolean(result.live);currentResult=result.directory||'';
+  $('scene-title').textContent=`${activeJob.source.name} · ${stageNames[stage]}`;
+  $('scene-note').hidden=true;message('');
+}
+for(const button of $('pipeline-steps').children)button.onclick=()=>{
+  if(exporting || submitting || uploading)return;
+  followJob=false;void exportingAction(()=>setStage(button.dataset.stage));
+};
+$('run-through').onchange=buttons;
+$('stage-chunk').onchange=()=>{previewKey='';void exportingAction(()=>previewStage());};
+$('stage-version').onchange=()=>void exportingAction(async()=>{
+  const version=$('stage-version').value;await saveDraft();
+  activeJob=await api(`/api/jobs/${activeJob.id}/select`,{run_id:version});
+  applyConfigs();renderJob();await setStage(selectedStage);
+});
+$('pose-precision').onchange=()=>draftChanged('pose',{precision:$('pose-precision').value});
+for(const id of ['training-steps','training-samples'])$(id).onchange=()=>draftChanged('splat',{steps:Number($('training-steps').value),samples_per_keyframe:Number($('training-samples').value)});
+$('generation-seed').onchange=()=>draftChanged('generate',{seed:Number($('generation-seed').value)});
 function renderBatch(report) {
   const done=report.jobs.filter(j=>j.status==='completed').length;
   const failed=report.jobs.filter(j=>j.status==='failed').length;
   const total=report.jobs.length || report.planned_chunks || 0;
-  $('batch-progress').hidden=report.status==='completed' || report.status==='idle';
+  $('batch-progress').hidden=!running && !['failed','cancelled','interrupted','stopped or failed'].includes(report.status);
   const training=report.jobs.find(j=>j.status==='running' && j.training?.stage==='training')?.training;
-  $('batch-status').textContent=running?(report.stage==='training'?'Training 4D scene':report.stage==='packaging 4D scene'?'Packaging 4D scene':report.stage==='preparing training views'?'Preparing training views':report.jobs.length?'Generating views':total>1?'Preparing clips':'Preparing video'):'Processing stopped';
+  $('batch-status').textContent=report.workflow?(running?stageNames[report.stage]:'Processing stopped'):running?(report.stage==='training'?'Training 4D scene':report.stage==='packaging 4D scene'?'Packaging 4D scene':report.stage==='preparing training views'?'Preparing training views':report.jobs.length?'Generating views':total>1?'Preparing clips':'Preparing video'):'Processing stopped';
   $('batch-meter').max=Math.max(1,total);
   if(running && (!report.jobs.length || total===1))$('batch-meter').removeAttribute('value');
   else $('batch-meter').value=done;
@@ -55,15 +199,6 @@ function renderBatch(report) {
   $('batch-detail').textContent=total>1?(report.jobs.length?`${done} of ${total} chunks complete${failed?` · ${failed} failed`:''}`
     :`${total} chunks queued`):'';
 }
-function settings() {
-  const invalid=Array.from($('settings').elements).find(e=>e.willValidate && !e.validity.valid);
-  if(invalid){invalid.reportValidity();throw Error('Check the highlighted setting.');}
-  const pitches=cameraPresets[Number($('views').value)];
-  return {views:Number($('views').value)/pitches.length, pitches, yaw:0,
-    span:360, turbo:$('mode').value === 'turbo', start_time:0,
-    fps:'auto', seed:42, train_4dgs:$('output-kind').value==='4dgs'};
-}
-$('output-kind').onchange=buttons;
 function showUploads() {
   $('files').replaceChildren();
   for (const video of videos) {
@@ -73,8 +208,8 @@ function showUploads() {
     name.className='source-info';
     const filename=document.createElement('span');filename.className='source-name';filename.textContent=video.name;filename.title=video.name;
     const edit=document.createElement('small');edit.textContent='Edit clip';name.append(filename,edit);button.append(thumb,name);
-    button.onclick=()=>{if(clipInfo)openClipEditor();else loadClip().catch(e=>message(e.message,true));};
-    const replace=document.createElement('button');replace.type='button';replace.className='source-replace quiet';replace.title='Replace video';replace.setAttribute('aria-label','Replace video');
+    button.onclick=()=>void exportingAction(()=>setStage('trim'));
+    const replace=document.createElement('button');replace.type='button';replace.className='source-replace quiet';replace.title='Add another video';replace.setAttribute('aria-label','Add another video');
     replace.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h15m-4-4 4 4-4 4M20 17H5m4-4-4 4 4 4"/></svg>';
     replace.onclick=()=>$('uploads').click();
     li.append(button,replace);$('files').append(li);
@@ -93,24 +228,24 @@ function upload(file) {
   });
 }
 async function addFiles(files) {
-  if(uploading || submitting)return;
+  if(uploading || submitting || running)return;
   uploading=true;buttons();
   try {
     if(files.length!==1)throw Error('Choose one video; its chunks will run as a batch.');
     const file=files[0];
     if(file.size>2*1024**3)throw Error(`${file.name} exceeds the 2 GiB upload limit.`);
     const uploaded=await upload(file);
-    resetClip(); videos=[uploaded]; showUploads();
-    await loadClip();
+    await openJob(uploaded.job_id,'trim');
+    await refreshResults();
     message('');
   }catch(e){message(e.message,true);}
   finally{uploading=false;$('uploads').value='';buttons();}
 }
 function resetClip() {
-  clipInfo=null; clipPlan=null; clipReady=false; previewBounds=null;committedClip=null;editing=false;
+  clipInfo=null; clipPlan=null; previewBounds=null;editing=false;
   filmstripAbort?.abort();$('filmstrip').replaceChildren();$('filmstrip').classList.remove('unavailable');
   ++planRevision;clearTimeout(planTimer);$('source').pause();
-  $('clip-summary').textContent='';$('chunks').replaceChildren();$('chunk-segments').replaceChildren();$('source-error').hidden=true;
+  $('chunks').replaceChildren();$('chunk-segments').replaceChildren();$('source-error').hidden=true;
 }
 function clipEdit() {
   return {start:Number($('trim-start').value),end:Number($('trim-end').value),skip:Number($('skip-frames').value)};
@@ -135,32 +270,16 @@ function updateTrimTrack() {
   if(trimSnapped)$('trim-end-range').setAttribute('aria-valuetext',`${clipTime(edit.end)}, snapped to a full chunk boundary`);
   $('speed-label').textContent=edit.skip?`Keep 1 of every ${edit.skip+1} frames`:'Every frame';
 }
-function openClipEditor() {
-  editorOrigin=workflow;workflow='prepare';
-  editing=true;followJob=false;
-  viewer?.setPlaying(false);previewBounds=clipEdit();buttons();
-  $('source').pause();$('source').currentTime=Math.max(0,Math.min(clipInfo.duration,previewBounds.start));
-  $('clip-title').focus({preventScroll:true});
-  if(!clipPlan)schedulePlan();
-}
-function leaveClipEditor(restore=true) {
-  ++planRevision;clearTimeout(planTimer);
-  if(restore && committedClip) {
-    clipPlan=committedClip.plan;clipReady=true;setClipFields(committedClip.edit);
-    $('source').playbackRate=committedClip.edit.skip+1;
-    renderClipPlan(clipPlan);
-  }
-  if(restore)workflow=editorOrigin;
-  editing=false;$('source').pause();$('editor-menu').open=false;buttons();
-}
+function leaveClipEditor() { editing=false;$('source').pause();$('editor-menu').open=false;buttons(); }
 async function loadClip() {
   const id=videos[0].id;
   message('Analyzing video…');
   const info=await api(`/api/uploads/${encodeURIComponent(id)}/info?timeline=true`);
   if(videos[0]?.id!==id)return;
   clipInfo=info;
-  setClipFields({start:0,end:info.duration,skip:0});
-  openClipEditor();message('');
+  const saved=activeJob?.configs.trim||{start:0,end:info.duration,skip:0};
+  setClipFields({...saved,end:saved.end??info.duration});
+  editing=selectedStage==='trim';workflow='prepare';schedulePlan();buttons();message('');
   $('source-playhead').setAttribute('aria-valuemax',String(info.duration));
   $('source-ruler').replaceChildren(...Array.from({length:5},(_,i)=>{const tick=document.createElement('span');tick.textContent=clipTime(i*info.duration/4);return tick;}));
   filmstripAbort?.abort();filmstripAbort=new AbortController();
@@ -197,7 +316,7 @@ function renderClipPlan(plan, validated=true) {
 }
 function schedulePlan() {
   $('source').pause();
-  clipReady=false;clipPlan=null;buttons();
+  clipPlan=null;buttons();
   const revision=++planRevision;clearTimeout(planTimer);
   $('use-chunks').disabled=true;$('chunks').replaceChildren();$('chunk-segments').replaceChildren();$('overlap-note').hidden=true;
   updateTrimTrack();
@@ -217,8 +336,9 @@ function schedulePlan() {
     try {
       const plan=await api('/api/clips/plan',{video,...edit});
       if(revision!==planRevision || videos[0]?.id!==video)return;
-      clipPlan=plan;
-      renderClipPlan(plan);
+      clipPlan=plan;renderClipPlan(plan);
+      if(activeJob && !running && JSON.stringify(activeJob.configs.trim)!==JSON.stringify(edit))draftChanged('trim',edit);
+      buttons();
     }catch(e){if(revision===planRevision){$('clip-plan-note').textContent=e.message;$('clip-plan-note').classList.add('error');}}
   },250);
 }
@@ -307,13 +427,10 @@ $('source').addEventListener('pause',()=>{cancelAnimationFrame(sourceAnimation);
 $('source').ontimeupdate=()=>{if(previewBounds && !$('source').paused && $('source').currentTime>=previewBounds.end){$('source').pause();$('source').currentTime=previewBounds.start;}};
 $('source').onplay=()=>{if(previewBounds && ($('source').currentTime<previewBounds.start || $('source').currentTime>=previewBounds.end))$('source').currentTime=previewBounds.start;};
 $('source').onerror=()=>{$('source-error').hidden=false;$('source-error').textContent='This browser cannot preview the upload. You can still trim using the time fields.';};
-$('close-clip').onclick=()=>{leaveClipEditor();document.querySelector('.source-select')?.focus();};
 $('use-chunks').onclick=()=>{
-  $('editor-menu').open=false;
   if(!clipPlan)return;
-  committedClip={plan:clipPlan,edit:clipEdit()};clipReady=true;leaveClipEditor(false);
-  $('clip-summary').textContent=`${clipTime(clipPlan.start)}–${clipTime(clipPlan.end)} · ${clipPlan.stride}× · ${clipPlan.chunks.length} ${clipPlan.chunks.length===1?'chunk':'chunks'}`;
-  requestLayoutPreview();$('views').focus({preventScroll:true});
+  draftChanged('trim',clipEdit());
+  void exportingAction(()=>setStage('pose'));
 };
 $('uploads').onchange=event=>addFiles(Array.from(event.target.files));
 $('drop-zone').ondragover=event=>{event.preventDefault();$('drop-zone').classList.add('dragging');};
@@ -340,18 +457,19 @@ window.addEventListener('resize',()=>{for(const menu of document.querySelectorAl
 document.addEventListener('pointerdown',e=>{for(const menu of document.querySelectorAll('.editor-menu[open]'))if(!menu.contains(e.target))menu.open=false;});
 const cameraPresets = {6:[15], 8:[15], 12:[15], 16:[0,30], 18:[0,30], 24:[0,30], 36:[-15,15,45]};
 function updateCameraHint() {
-  const count=Number($('views').value), pitches=cameraPresets[count];
+  const count=Number($('views').value), pitches=activeJob?.configs.generate.pitches||cameraPresets[count]||[15];
   $('camera-summary').textContent=`${pitches.length} ${pitches.length===1?'ring':'rings'} · ${pitches.map(p=>`${p}°`).join(' / ')}`;
   $('camera-summary').title=`${count/pitches.length} cameras per ring · full orbit`;
 }
-$('mode').onchange=()=>{$('model-menu').open=false;};
-$('views').onchange=()=>{updateCameraHint();buttons();requestLayoutPreview();};
+$('mode').onchange=()=>{$('model-menu').open=false;draftChanged('generate',{turbo:$('mode').value==='turbo'});};
+$('views').onchange=()=>{const count=Number($('views').value),pitches=cameraPresets[count]||[15];draftChanged('generate',{views:count/pitches.length,pitches});updateCameraHint();buttons();requestLayoutPreview();};
 updateCameraHint();
 async function showScene(scene, urls = [], preserve = false) {
   if(!preserve){trainingWatch=null;liveDirectory='';}
   await viewerReady;
   if(!preserve) $('camera').replaceChildren(...scene.cameras.map((c,i)=>new Option(String(c.camera_id).padStart(2,'0'),String(i))));
   $('scene-card').classList.toggle('layout-preview',scene.frames===1 && !urls.length);
+  $('scene-card').classList.toggle('body-preview',!scene.cameras.length && scene.frames>1);
   await viewer.setScene(scene,urls,preserve);
   const bodyLabel=viewer.bodyMesh?'Body mesh':'Body skeleton';
   $('show-body').setAttribute('aria-label',bodyLabel);$('show-body').parentElement.title=bodyLabel;
@@ -388,8 +506,8 @@ function trainingNote(info) {
     $('scene-note').textContent=`${state} · step ${loadedTraining.preview_step.toLocaleString()}${state==='Training preview'?' · updates automatically':''}`;
   }
 }
-$('active-job').onchange=()=>{liveVersion='';autoOpenedBatch=undefined;followJob=true;explicitInitialResult=false;buttons();};
-$('resume-live').onclick=()=>{followJob=true;explicitInitialResult=false;liveVersion='';autoOpenedBatch=undefined;pendingLayout=null;buttons();void poll();};
+$('active-job').onchange=()=>{liveVersion='';previewKey='';$('stage-chunk').value=$('active-job').value;autoOpenedBatch=undefined;followJob=true;explicitInitialResult=false;buttons();};
+$('resume-live').onclick=()=>{previewKey='';followJob=true;explicitInitialResult=false;liveVersion='';autoOpenedBatch=undefined;pendingLayout=null;buttons();void poll();};
 async function updateLive(report) {
   if(liveBusy || exporting || deletingJob || !followJob || report.status!=='running')return;
   liveBusy=true; buttons();
@@ -418,9 +536,9 @@ async function exportingAction(action) {
 }
 function requestLayoutPreview() {
   workflow='prepare';
-  const count=Number($('views').value), pitches=cameraPresets[count];
+  const count=Number($('views').value), pitches=activeJob?.configs.generate.pitches||cameraPresets[count]||[15];
   // Preview depends only on camera geometry, not clip timing or upload state.
-  pendingLayout={views:count/pitches.length,pitches,yaw:0,span:360,turbo:$('mode').value==='turbo'};
+  pendingLayout={views:count/pitches.length,pitches,yaw:activeJob?.configs.generate.yaw||0,span:activeJob?.configs.generate.span||360,turbo:$('mode').value==='turbo'};
   followJob=false; liveVersion='';
   flushLayoutPreview();
 }
@@ -438,15 +556,18 @@ function flushLayoutPreview() {
     message('');
   });
 }
-$('settings').onsubmit = async event => {
-  event.preventDefault(); if (submitting || running || uploading || !clipReady) return;
-  submitting=true;buttons();
+$('generate').onclick = async () => {
+  if(submitting || running || uploading || !activeJob)return;
+  submitting=true;clearTimeout(saveTimer);++saveRevision;buttons();
   try {
-    const result=await api('/api/jobs',{videos:videos.map(v=>v.id),settings:settings(),clip:committedClip.edit});
-    workflow='processing';workflowJob=result.directory;
-    running = true; explicitInitialResult=false; liveVersion=''; followJob=true; buttons(); message(''); await poll();
-  } catch(e) { message(e.message,true); }
-  finally {submitting=false;buttons();}
+    await savePromise.catch(()=>{});
+    if(selectedStage==='trim')activeJob.configs.trim=clipEdit();
+    const result=await api(`/api/jobs/${activeJob.id}/run`,{start:selectedStage,through:$('run-through').value,configs:activeJob.configs});
+    activeJob=result;jobDirty=false;$('job-save').textContent='Saved';
+    workflow='processing';workflowJob=result.directory;activeTaskId=result.id;
+    running=true;explicitInitialResult=false;liveVersion='';previewKey='';followJob=true;renderJob();message('');await poll();
+  }catch(e){message(e.message,true);}
+  finally{submitting=false;buttons();}
 };
 $('cancel').onclick = async () => {
   if(stopping)return;stopping=true;buttons(); message('Stopping the batch…');
@@ -476,13 +597,13 @@ function renderGallery() {
   $('result-gallery').replaceChildren();
   for(const job of completedJobs.filter(j=>`${j.name} ${jobDate(j.completed_at)}`.toLowerCase().includes(query))) {
     const card=document.createElement('article');card.className='result-card';card.dataset.job=job.id;
-    const open=document.createElement('button');open.type='button';open.className='result-open';open.dataset.unavailable=String(!job.results.length);
+    const open=document.createElement('button');open.type='button';open.className='result-open';open.dataset.unavailable=String(!job.results.length && !job.workflow);
     const preview=document.createElement('span');preview.className='result-preview';
     const placeholder=document.createElement('span');placeholder.className='result-placeholder';
     const image=document.createElement('img');image.alt='';image.loading='lazy';image.decoding='async';image.width=480;image.height=288;
     image.onload=()=>{placeholder.hidden=true;image.style.opacity='1';};
     image.onerror=()=>{image.style.opacity='0';placeholder.hidden=false;placeholder.textContent='Preview unavailable';};
-    const badge=document.createElement('span');badge.className='result-badge';badge.textContent=`${job.cameras} views`;
+    const badge=document.createElement('span');badge.className='result-badge';badge.textContent=job.state==='draft'?'Draft':`${job.cameras} views`;
     preview.append(placeholder,image,badge);
     const caption=document.createElement('span');caption.className='result-caption';
     const name=document.createElement('span');name.className='result-name';name.textContent=job.name;name.title=job.name;
@@ -493,10 +614,10 @@ function renderGallery() {
     job.results.forEach(result=>select.add(new Option(result.label,result.directory)));
     if(job.results.length>1){select.className='result-chunk';card.append(select);}
     card.setResult=result=>{
-      badge.textContent=result?.training==='completed'?'4D scene':result?.training==='failed'||result?.training==='cancelled'?`${job.cameras} views · training stopped`:`${job.cameras} views`;
+      badge.textContent=!result?(job.state==='running'?'Processing':'Draft'):result?.training==='completed'?'4D scene':result?.training==='failed'||result?.training==='cancelled'?`${job.cameras} views · training stopped`:`${job.cameras} views`;
       card.dataset.directory=result?.directory||'';select.value=result?.directory||'';
       open.setAttribute('aria-label',`Open ${job.name}${job.results.length>1?`, ${result?.label}`:''}, ${jobDate(job.completed_at)}`);
-      placeholder.hidden=false;placeholder.textContent=result?.thumbnail?'Loading preview…':'Preview unavailable';image.hidden=!result?.thumbnail;image.style.opacity='0';
+      placeholder.hidden=false;placeholder.textContent=result?.thumbnail?'Loading preview…':job.workflow?'Open job':'Preview unavailable';image.hidden=!result?.thumbnail;image.style.opacity='0';
       if(result?.thumbnail)image.src=result.thumbnail;else image.removeAttribute('src');
     };
     card.setResult(job.results.find(r=>r.directory===currentResult)||job.results.find(r=>r.directory===galleryChunks.get(job.id))||job.results[0]);
@@ -504,7 +625,9 @@ function renderGallery() {
       if(exporting || liveBusy || deletingJob)return;
       followJob=false;pendingLayout=null;
       void exportingAction(async()=>{
-        await openResult(card.dataset.directory);
+        if(!running || job.id===activeTaskId)await openJob(job.id,null,card.dataset.directory);
+        else if(card.dataset.directory)await openResult(card.dataset.directory);
+        else message('Finish the active task before opening another job.');
         if(matchMedia('(max-width:760px)').matches)$('scene-card').scrollIntoView({behavior:matchMedia('(prefers-reduced-motion:reduce)').matches?'auto':'smooth',block:'start'});
       });
     };
@@ -512,6 +635,7 @@ function renderGallery() {
     const remove=document.createElement('button');remove.type='button';remove.className='result-delete';remove.title='Delete result';
     remove.setAttribute('aria-label',`Delete ${job.name}, ${jobDate(job.completed_at)}`);
     remove.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/></svg>';
+    remove.dataset.unavailable=String(job.state==='running');
     remove.onclick=()=>{
       deleteTarget=job;
       $('delete-job-name').textContent=`${job.name} · ${job.chunks} ${job.chunks===1?'chunk':'chunks'} · ${jobSize(job.bytes)}`;
@@ -519,7 +643,7 @@ function renderGallery() {
     };
     card.append(remove);$('result-gallery').append(card);
   }
-  if(!$('result-gallery').children.length){const empty=document.createElement('p');empty.className='gallery-empty';empty.textContent=query?'No matching results.':'Your generated scenes will appear here.';$('result-gallery').append(empty);}
+  if(!$('result-gallery').children.length){const empty=document.createElement('p');empty.className='gallery-empty';empty.textContent=query?'No matching results.':'Add a video to start a job.';$('result-gallery').append(empty);}
   markGallerySelection();buttons();
 }
 $('result-search').oninput=renderGallery;
@@ -545,6 +669,7 @@ $('delete-job').onclick=async()=>{
   try {
     await api(`/api/jobs/${encodeURIComponent(job.id)}`,undefined,'DELETE');deleted=true;
     $('delete-job-dialog').close();
+    if(activeJob?.id===job.id){activeJob=null;resetClip();videos=[];showUploads();workflow='results';localStorage.removeItem('4danyone-job');}
     if(viewed){
       if(!keepLive)followJob=false;
       currentResult='';liveVersion='';markGallerySelection();
@@ -564,20 +689,15 @@ $('delete-job').onclick=async()=>{
   if(deleted && viewed && !editing && !keepLive && resultPaths.length)await exportingAction(()=>openResult(resultPaths[0]));
 };
 function chooseCamera() { viewer?.selectCamera(Number($('camera').value)); }
-$('back-to-results').onclick=async()=>{
-  followJob=false;pendingLayout=null;workflow='results';buttons();
-  await exportingAction(async()=>{
-    const directory=resultPaths.includes(lastResult)?lastResult:resultPaths[0];
-    if(directory)await openResult(directory);
-    else {
-      currentResult='';markGallerySelection();
-      await showScene({cameras:[],frames:1,fps:25,keypoints:null,links:[],joint_ids:[],joint_colors:[]});
-      $('scene-title').textContent='Your scene';$('scene-note').hidden=false;
-      $('scene-note').textContent='Add a video to create your first scene.';
-    }
-  });
+async function showLibrary() {
+  if(submitting || uploading)return;
+  try{await saveDraft();}catch(e){message(e.message,true);return;}
+  $('source').pause();editing=false;followJob=false;pendingLayout=null;workflow='results';
+  $('stage-chunk').hidden=true;buttons();await refreshResults();
   ($('result-gallery').querySelector('.selected .result-open') || $('results-title')).focus();
-};
+}
+$('job-library').onclick=showLibrary;
+$('active-task').onclick=()=>void exportingAction(()=>openJob(activeTaskId));
 async function openResult(directory) {
   if(editing)leaveClipEditor();
   if(!directory.trim())throw Error('Choose a saved result.');
@@ -586,7 +706,6 @@ async function openResult(directory) {
   await showScene(result.scene,result.videos,directory===liveDirectory||directory===currentResult);
   updateTraining(result.training);
   currentResult=result.directory||directory.trim();
-  lastResult=currentResult;
   markGallerySelection();
   const owner=completedJobs.find(j=>j.results.some(r=>r.directory===currentResult));
   const chunk=owner?.results.find(r=>r.directory===currentResult);
@@ -600,7 +719,8 @@ async function poll() {
   try {
     const {report,logs} = await api('/api/status');
     $('connection').hidden=true;running=report.status==='running';
-    if(workflow==='processing' && report.directory===workflowJob && !running)workflow='results';
+    activeTaskId=running?(report.job_id || report.directory?.split('/').at(-1)||''):'';
+    if(workflow==='processing' && report.directory===workflowJob && !running)workflow='prepare';
     renderBatch(report);
     $('logs').textContent=logs||'';$('logs').hidden=!logs;
     const jobIndex=$('active-job').value;
@@ -615,6 +735,31 @@ async function poll() {
     const statusKey=`${report.directory}:${report.status}:${report.jobs.filter(j=>j.status==='completed').length}`;
     if(previousStatus!==statusKey || Date.now()-lastGalleryRefresh>15000)await refreshResults();
     previousStatus = statusKey; buttons();
+    if(activeJob && workflow!=='results' && !submitting) {
+      const id=activeJob.id, state=await api(`/api/jobs/${id}`);
+      if(activeJob?.id===id) {
+        if(jobDirty)state.configs=activeJob.configs;
+        activeJob=state;
+        if(followJob && state.active?.stage && state.active.stage!==selectedStage){
+          selectedStage=state.active.stage;editing=selectedStage==='trim';previewKey='';pendingLayout=null;
+        }
+        renderJob();
+        const active=state.runs.find(r=>r.stage===selectedStage && r.status==='running');
+        const run=active || chosenRun(selectedStage);
+        const key=run?`${id}:${run.id}:${Number($('stage-chunk').value)||0}`:'';
+        if(followJob && !editing && !exporting && !stagePreviewBusy && run && (key!==previewKey || previewLive || (selectedStage==='generate' && run.status==='running'))) {
+          stagePreviewBusy=true;buttons();
+          void previewStage(selectedStage,run).catch(e=>message(e.message,true)).finally(()=>{stagePreviewBusy=false;buttons();});
+        }
+      }
+    }
+    if(report.workflow) {
+      if(trainingWatch && !trainingPollBusy){
+        const watch=trainingWatch;trainingPollBusy=true;
+        void api(watch).then(info=>{if(trainingWatch===watch)updateTraining(info);}).catch(()=>{}).finally(()=>{trainingPollBusy=false;});
+      }
+      return;
+    }
     const selectedJob=Number($('active-job').value)||0;
     const resultKey=`${report.directory}:${selectedJob}`;
     if (autoOpenedBatch !== resultKey && !exporting && !liveBusy && !deletingJob && followJob && !explicitInitialResult && !editing) {
@@ -675,13 +820,15 @@ async function initialize() {
   })();
   viewerReady.catch(e=>{ message(`3D viewer could not start: ${e.message}`,true); });
   try {
-    const config = await api('/api/config'); videos=config.videos.slice(0,1); showUploads();
-    if(!config.training_available){$('output-kind').value='videos';$('output-kind').options[0].disabled=true;$('output-kind').options[0].textContent='4D scene (setup required)';}
+    const config = await api('/api/config');
+    trainingAvailable=config.training_available;
+    if(!trainingAvailable)$('run-through').value='generate';
     explicitInitialResult=Boolean(config.output_dir);
     await poll();
     if(config.output_dir) await exportingAction(()=>openResult(config.output_dir));
-    else if(!running && !viewer?.data && resultPaths.length) await exportingAction(()=>openResult(resultPaths[0]));
-    if(videos.length)await loadClip();
+    else if(running && activeTaskId)await exportingAction(()=>openJob(activeTaskId));
+    else if(config.videos.length)await exportingAction(()=>openJob(config.videos[0].job_id));
+    else {const saved=localStorage.getItem('4danyone-job');if(saved && completedJobs.some(j=>j.id===saved))await exportingAction(()=>openJob(saved));}
   } catch(e) { message(e.message,true); }
   const tick = async () => { await poll(); setTimeout(tick,2000); }; setTimeout(tick,2000);
 }

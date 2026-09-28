@@ -306,7 +306,7 @@ class TrainingAPITests(unittest.TestCase):
         response = self.client.get('/api/status').json()['report']
         self.assertEqual(response['stage'],'training')
         self.assertEqual(response['jobs'][0]['training']['step'],500)
-        self.assertEqual(self.client.get('/api/jobs').json(),[])
+        self.assertEqual([j['state'] for j in self.client.get('/api/jobs').json()], ['draft'])
         manager.process = None
 
 

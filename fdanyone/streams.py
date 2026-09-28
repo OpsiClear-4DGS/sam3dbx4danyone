@@ -157,7 +157,12 @@ def _serve_worker():
                 os.dup2(log.fileno(), 1)
                 os.dup2(log.fileno(), 2)
                 try:
-                    result = inference(**json.loads(request.read_text()))
+                    options = json.loads(request.read_text())
+                    if '_stage' in options:
+                        from fdanyone.space.workflow import execute_stage
+                        result = execute_stage(options)
+                    else:
+                        result = inference(**options)
                     write_json(request.with_name('result.json'), result)
                 except Exception:
                     code = 1

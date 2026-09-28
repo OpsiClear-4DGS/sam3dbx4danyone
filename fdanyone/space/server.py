@@ -63,6 +63,21 @@ class Submission(BaseModel):
     clip: ClipEdit | None = None
 
 
+class JobConfiguration(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    configs: dict[str, dict] = Field(default_factory=dict)
+
+
+class StageSubmission(JobConfiguration):
+    start: str
+    through: str
+
+
+class VersionSelection(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    run_id: str
+
+
 class ResultRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
     directory: str = Field(min_length=1)
@@ -91,7 +106,9 @@ def create_app(cache_dir='outputs/ui', model_dir='models', *, video_path=None,
         token = uuid.uuid4().hex + source.suffix.lower()
         shutil.copyfile(source, uploads/token)
         write_json(uploads/(token+'.upload.json'), {'name': source.name})
-        initial.append({'id': token, 'name': source.name, 'url': '/media/uploads/'+token})
+        item = {'id': token, 'name': source.name, 'url': '/media/uploads/'+token}
+        item['job_id'] = manager.workflow.create(dict(item, path=str(uploads/token)))['id']
+        initial.append(item)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -160,7 +177,9 @@ def create_app(cache_dir='outputs/ui', model_dir='models', *, video_path=None,
                 raise HTTPException(400, 'The uploaded file is empty.')
             temporary.replace(target)
             write_json(uploads/(token+'.upload.json'), {'name': name})
-            return {'id': token, 'name': name, 'url': '/media/uploads/'+token}
+            item = {'id': token, 'name': name, 'url': '/media/uploads/'+token}
+            item['job_id'] = manager.workflow.create(dict(item, path=str(target)))['id']
+            return item
         finally:
             temporary.unlink(missing_ok=True)
             await file.close()
@@ -252,8 +271,8 @@ def create_app(cache_dir='outputs/ui', model_dir='models', *, video_path=None,
         chunk = result['chunk']
         info = dict(status=status.get('status'), step=status.get('step', 0),
                     steps=status.get('steps', 0), model=None,
-                    watch=f'/api/jobs/{job_id}/training?chunk={chunk}')
-        output = Path(result['directory'])/'training'
+                    watch=f'/api/jobs/{job_id}/training?chunk={chunk}'+('&run='+result['run_id'] if result.get('run_id') else ''))
+        output = Path(result.get('output_dir', str(Path(result['directory'])/'training')))
         if not output.resolve().is_relative_to(manager.job_directory(job_id)):
             return info
         preview_step = status.get('preview_step', 0)
@@ -268,7 +287,7 @@ def create_app(cache_dir='outputs/ui', model_dir='models', *, video_path=None,
             transforms = {key:normalization[key] for key in ('world_to_training','training_to_world')}
         except (HTTPException, OSError, ValueError, KeyError, TypeError):
             return info
-        model_url = f'/api/jobs/{job_id}/model?chunk={chunk}'
+        model_url = f'/api/jobs/{job_id}/model?chunk={chunk}'+('&run='+result['run_id'] if result.get('run_id') else '')
         if not completed:
             model_url += f'&preview={preview_step}'
         version = f'{stat.st_mtime_ns}-{stat.st_size}'
@@ -303,16 +322,16 @@ def create_app(cache_dir='outputs/ui', model_dir='models', *, video_path=None,
                 'metadata': metadata, 'note': note, 'directory': str(directory), 'training': result_training(directory)}
 
     @app.get('/api/jobs/{job_id}/training')
-    def training(job_id: str, chunk: int = 0):
-        result = next((r for r in manager.training_results(job_id) if r['chunk'] == chunk), None)
+    def training(job_id: str, chunk: int = 0, run: str | None = None):
+        result = next((r for r in manager.training_results(job_id, run) if r['chunk'] == chunk), None)
         if result is None:
             raise HTTPException(404, 'Training result not found.')
         return JSONResponse(training_info(job_id, result), headers={'Cache-Control':'no-store'})
 
     @app.get('/api/jobs/{job_id}/model')
-    def trained_model(job_id: str, chunk: int = 0, preview: int = 0):
+    def trained_model(job_id: str, chunk: int = 0, preview: int = 0, run: str | None = None):
         with artifact_lock:
-            result = next((r for r in manager.training_results(job_id) if r['chunk'] == chunk), None)
+            result = next((r for r in manager.training_results(job_id, run) if r['chunk'] == chunk), None)
             if result is None:
                 raise HTTPException(404, '4D scene not found.')
             status = result['training']
@@ -325,7 +344,7 @@ def create_app(cache_dir='outputs/ui', model_dir='models', *, video_path=None,
                     raise HTTPException(404, '4D scene is not complete.')
                 relative = final_model(status)
             directory = manager.job_directory(job_id)
-            path = Path(result['directory'])/'training'/relative
+            path = Path(result.get('output_dir', str(Path(result['directory'])/'training')))/relative
             return FileResponse(within(directory, str(path.relative_to(directory))),
                                 media_type='application/octet-stream', filename=Path(relative).name,
                                 headers={'Cache-Control':'private, max-age=3600'})
@@ -341,6 +360,10 @@ def create_app(cache_dir='outputs/ui', model_dir='models', *, video_path=None,
                             paths.append(job['result_dir'])
             except (OSError, ValueError, KeyError):
                 continue
+        for job in manager.completed():
+            for result in job['results']:
+                if result['directory'] not in paths:
+                    paths.append(result['directory'])
         return paths
 
     @app.get('/media/{kind}/{relative:path}')
@@ -367,6 +390,69 @@ def create_app(cache_dir='outputs/ui', model_dir='models', *, video_path=None,
             scene_urls(result['scene'])
             result['videos'] = [media_url(p) if p else None for p in result['videos']]
         return result
+
+    @app.get('/api/jobs/{job_id}')
+    def job_detail(job_id: str):
+        return JSONResponse(manager.workflow.describe(job_id), headers={'Cache-Control':'no-store'})
+
+    @app.patch('/api/jobs/{job_id}')
+    def configure_job(job_id: str, body: JobConfiguration):
+        return manager.workflow.configure(job_id, body.configs)
+
+    @app.post('/api/jobs/{job_id}/run')
+    def run_job(job_id: str, body: StageSubmission):
+        return manager.workflow.start(job_id, body.start, body.through, body.configs)
+
+    @app.post('/api/jobs/{job_id}/select')
+    def select_version(job_id: str, body: VersionSelection):
+        return manager.workflow.select(job_id, body.run_id)
+
+    @app.get('/api/jobs/{job_id}/stage')
+    def stage_result(job_id: str, stage: str, chunk: int = 0, run: str | None = None, version: str = ''):
+        from fractions import Fraction
+        from .workflow import selected_run, owned, STAGES
+        from .viewer import scene_payload, load_points, export_mesh
+        if stage not in STAGES:
+            raise ValueError('Unknown pipeline stage.')
+        job = manager.workflow.load(job_id)
+        attempt = next((r for r in job['runs'] if r['id'] == run and r['stage'] == stage), None) if run else selected_run(job, stage)
+        if not attempt or chunk < 0 or chunk >= len(attempt.get('artifacts', [])):
+            return {'pending': True}
+        item = attempt['artifacts'][chunk]
+        directory = manager.job_directory(job_id)
+        cache = manager.preview_root(directory)
+        with artifact_lock:
+            if stage == 'pose':
+                geometry = owned(directory, item['pose_dir'])/'viewer_geometry.npz'
+                if not geometry.is_file():
+                    return {'pending': True}
+                cache.mkdir(parents=True, exist_ok=True)
+                scene = scene_payload([], Fraction(item['fps']), load_points(geometry))
+                scene['mesh'] = export_mesh(geometry, cache)
+                return dict(scene=scene_urls(scene), videos=[], label=item['label'])
+            if stage in ('generate', 'splat'):
+                result = owned(directory, item['result_dir'])
+                if not (result/'metadata.json').is_file():
+                    if stage == 'generate' and attempt['status'] == 'running':
+                        request = result.parents[1]/'request.json'
+                        preview = live_preview(dict(request=str(request), result_dir=str(result)), cache, version)
+                        if 'scene' in preview:
+                            scene_urls(preview['scene'])
+                            preview['videos'] = [media_url(p) if p else None for p in preview['videos']]
+                            preview['live'] = True
+                        return preview
+                    return {'pending': True}
+                scene, videos, metadata, note = export_result(result, cache)
+                training = None
+                if stage == 'splat':
+                    record = next((r for r in manager.training_results(job_id, attempt['id']) if r['chunk'] == item['chunk']), None)
+                    if record:
+                        training = training_info(job_id, record)
+                    elif attempt['status'] in ('queued','running'):
+                        training = dict(status='running', watch=f"/api/jobs/{job_id}/training?chunk={item['chunk']}&run={attempt['id']}")
+                return dict(scene=scene_urls(scene), videos=[media_url(p) for p in videos],
+                            training=training, directory=str(result), label=item['label'], note=note)
+        return {'pending': True}
 
     @app.get('/ftgs/{module}')
     def ftgs_module(module: str):

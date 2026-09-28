@@ -11,6 +11,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import time
 import threading
 import uuid
 
@@ -86,11 +87,17 @@ class JobManager:
         reports = list(self.root.glob('job-*/results/streams_report.json'))
         self.directory = max(reports, key=lambda p:p.stat().st_mtime_ns).parent.parent if reports else None
         self.lock = threading.RLock()
+        from .workflow import WorkflowStore
+        self.workflow = WorkflowStore(self)
+        workflows = list(self.root.glob('job-*/job.json'))
+        if workflows:
+            active = [p for p in workflows if _read_json(p).get('active')]
+            self.directory = max(active or workflows, key=lambda p:p.stat().st_mtime_ns).parent
 
     def start(self, videos, options, *, clip_plan=None, source_names=None):
         with self.lock:
-            if self.process is not None and self.process.poll() is None:
-                raise ValueError('A batch is already running. Wait for it or cancel it first.')
+            if self.workflow.busy():
+                raise ValueError('A task is already running. Wait for it or cancel it first.')
             paths = [str(Path(p).expanduser().resolve()) for p in videos or []]
             if not paths or any(not Path(p).is_file() for p in paths):
                 raise ValueError('Choose at least one existing input video.')
@@ -134,6 +141,25 @@ class JobManager:
         return self.root/'previews'/'external'
 
     def _completed(self, directory):
+        if (directory/'job.json').is_file():
+            from .workflow import selected_run, stale
+            job = self.workflow.load(directory.name)
+            generated = selected_run(job, 'generate')
+            training = selected_run(job, 'splat')
+            results = []
+            if generated:
+                for item in generated['artifacts']:
+                    result = Path(item['result_dir']).resolve()
+                    if result.is_relative_to(directory) and result.is_dir():
+                        matching = next((a for a in (training or {}).get('artifacts', []) if a['result_dir'] == str(result)), None)
+                        results.append(dict(directory=str(result), label=item['label'],
+                                            training='completed' if matching else None))
+            config = generated['config'] if generated else job['configs']['generate']
+            return dict(id=job['id'], directory=str(directory), name=job['source']['name'], workflow=True,
+                        state='running' if job['active'] else ('completed' if results else 'draft'),
+                        completed_at=job['updated_at'], cameras=config['views']*len(config['pitches']),
+                        chunks=len(results), results=results,
+                        bytes=_tree_bytes(directory)+_tree_bytes(self.root/'previews'/directory.name))
         if directory == self.directory and self.process is not None and self.process.poll() is None:
             return None
         report_path = directory/'results/streams_report.json'
@@ -183,11 +209,29 @@ class JobManager:
         with self.lock:
             return self._completed(self.job_directory(job_id))
 
-    def training_results(self, job_id):
+    def training_results(self, job_id, run_id=None):
         """Owned results with training state, including active/partial models."""
         from fdanyone.reconstruction import training_status
         with self.lock:
             directory = self.job_directory(job_id)
+            if (directory/'job.json').is_file():
+                from .workflow import selected_run
+                job = self.workflow.load(job_id)
+                if run_id:
+                    run = next((r for r in job['runs'] if r['id'] == run_id and r['stage'] == 'splat'), None)
+                else:
+                    # Include live training; URLs pin its immutable attempt so a
+                    # later selection cannot change an in-flight download.
+                    run = next((r for r in reversed(job['runs']) if r['stage'] == 'splat' and r['status'] == 'running'), None) or selected_run(job, 'splat')
+                results = []
+                for item in (run or {}).get('artifacts', []):
+                    output = Path(item['training_dir']).resolve()
+                    if output.is_relative_to(directory):
+                        status = _read_json(output/'status.json')
+                        if status:
+                            results.append(dict(chunk=item['chunk'], directory=item['result_dir'],
+                                                output_dir=str(output), training=status, run_id=run['id']))
+                return results
             jobs = _read_json(directory/'results/streams_report.json').get('jobs', [])
             results = []
             for index, job in enumerate(jobs):
@@ -203,7 +247,7 @@ class JobManager:
     def delete_completed(self, job_id):
         with self.lock:
             directory = self.job_directory(job_id)
-            if not self._completed(directory):
+            if ((directory/'job.json').is_file() and self.workflow.load(job_id).get('active')) or not self._completed(directory):
                 raise ValueError('Only completed jobs can be deleted. Running and unfinished jobs are protected.')
             previews = self.root/'previews'/job_id
             if previews.is_symlink() or previews.resolve() != previews:
@@ -223,6 +267,31 @@ class JobManager:
         with self.lock:
             if self.directory is None:
                 return {'status': 'idle', 'jobs': []}, ''
+            if (self.directory/'job.json').is_file():
+                job = self.workflow.load(self.directory.name)
+                active = job.get('active')
+                latest = next((r for r in job['runs'] if r['status'] == 'running'), None) or (job['runs'][-1] if job['runs'] else None)
+                data = dict(jobs=[], status='running' if active else (latest['status'] if latest else 'idle'),
+                            directory=str(self.directory), job_id=job['id'], workflow=True,
+                            stage=latest['stage'] if latest else 'trim', active=active)
+                logs = []
+                if latest:
+                    stage_root = self.directory/'stages'/latest['id']
+                    data.update(_read_json(stage_root/'streams_report.json'))
+                    for i, row in enumerate(data['jobs']):
+                        artifacts = latest.get('artifacts', [])
+                        if i < len(artifacts) and artifacts[i].get('training_dir'):
+                            row['training'] = _read_json(Path(artifacts[i]['training_dir'])/'status.json')
+                    data['run_id'] = latest['id']
+                    data['error'] = latest.get('error')
+                    logs = [Path(j['log']) for j in data['jobs']]
+                chunks = []
+                for path in [self.directory/'launcher.log', *logs]:
+                    if path.is_file():
+                        with path.open('rb') as stream:
+                            stream.seek(max(0, path.stat().st_size-6000))
+                            chunks.append(path.name+'\n'+stream.read().decode(errors='replace'))
+                return data, '\n\n'.join(chunks)[-20000:]
             report = self.directory/'results/streams_report.json'
             data = json.loads(report.read_text()) if report.exists() else {'jobs': []}
             code = self.process.poll() if self.process else (0 if data['jobs'] and all(j['status'] == 'completed' for j in data['jobs']) else 1)
@@ -264,9 +333,32 @@ class JobManager:
                 # The child turns SIGTERM into KeyboardInterrupt; run_queue's
                 # finally block terminates its separate GPU process groups.
                 self.process.wait(timeout=30)
+            elif self.directory and (self.directory/'job.json').is_file():
+                job = self.workflow.load(self.directory.name)
+                active = job.get('active')
+                if active:
+                    pid = active.get('pid')
+                    try:
+                        command = Path(f'/proc/{int(pid)}/cmdline').read_bytes().split(b'\0')
+                    except (ValueError, TypeError, OSError):
+                        raise ValueError('The task process is unavailable. Refresh its status.') from None
+                    if b'fdanyone.space.workflow' not in command or str(self.directory/'job.json').encode() not in command:
+                        raise ValueError('The task process could not be verified.')
+                    try:
+                        os.killpg(pid, signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+                    deadline = time.monotonic()+30
+                    while self.workflow.busy() and time.monotonic()<deadline:
+                        time.sleep(.1)
+                    if self.workflow.busy():
+                        raise ValueError('Stop requested; the task is still shutting down.')
             return 'Stopped. Completed outputs have been preserved.'
 
-    close = cancel
+    def close(self):
+        # A second viewer/server must not cancel another server's owned queue.
+        if self.process is not None and self.process.poll() is None:
+            self.cancel()
 
 
 def main():

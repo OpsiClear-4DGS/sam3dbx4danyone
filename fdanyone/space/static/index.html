@@ -4,25 +4,40 @@
 <body>
 <header><span class="brand">sam3dbx4danyone</span><div class="header-links"><span id="connection" role="status" hidden></span><a href="https://github.com/OpsiClear-4DGS/sam3dbx4danyone" target="_blank" rel="noopener noreferrer" title="Source code (AGPL-3.0)">Source</a></div></header>
 <main>
-<aside aria-label="Video creation and results">
+<aside aria-label="Job control and results">
+<div class="job-navigation"><button id="job-library" type="button" class="quiet" hidden>← Jobs</button><button id="active-task" type="button" class="quiet" hidden>Active task →</button></div>
 
 <input id="uploads" class="file-input" type="file" accept="video/*"><label class="drop" id="drop-zone" for="uploads"><span><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg><span>Add video</span></span><small>Drop a video to get started</small></label>
-<ul id="files"></ul><p id="clip-summary" class="hint" hidden></p>
-<form id="settings" novalidate hidden>
-<div class="section-title"><label for="views">Cameras</label><details id="model-menu" class="editor-menu compact-menu"><summary aria-label="Generation options">⋯</summary><div class="editor-menu-content"><label for="mode">Model</label><select id="mode"><option value="turbo">Turbo</option><option value="base">Base</option></select></div></details></div><div class="field-line camera-field"><select id="views" required aria-label="Camera preset"><option value="6">6 cameras</option><option value="8">8 cameras</option><option value="12">12 cameras</option><option value="16">16 cameras</option><option value="18">18 cameras</option><option value="24">24 cameras</option><option value="36">36 cameras</option></select></div>
+<ul id="files"></ul>
+<section id="job-panel" aria-label="Task control panel" hidden>
+<nav id="pipeline-steps" aria-label="Pipeline steps">
+<button type="button" data-stage="trim"><span>1 <b>Trim</b></span><small>Not run</small></button>
+<button type="button" data-stage="pose"><span>2 <b>Extract pose</b></span><small>Not run</small></button>
+<button type="button" data-stage="generate"><span>3 <b>Generate videos</b></span><small>Not run</small></button>
+<button type="button" data-stage="splat"><span>4 <b>Splat 4DGS</b></span><small>Not run</small></button>
+</nav>
+<div class="step-heading"><h2 id="step-title">Trim</h2><span id="job-save" class="hint" role="status"></span></div>
+<div id="version-field" hidden><label for="stage-version">Output version</label><select id="stage-version"></select></div>
+<p id="step-note" class="hint"></p><p id="step-input" class="hint" hidden></p>
+<div id="pose-settings" hidden><label for="pose-precision">Pose precision</label><select id="pose-precision"><option value="fp16">Fast · FP16</option><option value="fp32">Full · FP32</option></select></div>
+<div id="splat-settings" hidden><label for="training-steps">Training steps</label><input id="training-steps" type="number" min="1" max="100000" step="1" value="30000"><label for="training-samples">Points per keyframe</label><select id="training-samples"><option value="16384">16,384</option><option value="32768" selected>32,768</option><option value="65536">65,536</option></select></div>
+<div id="settings" hidden>
+<div class="section-title"><label for="views">Cameras</label><details id="model-menu" class="editor-menu compact-menu"><summary aria-label="Generation options">⋯</summary><div class="editor-menu-content"><label for="mode">Model</label><select id="mode"><option value="turbo">Turbo</option><option value="base">Base</option></select><label for="generation-seed">Seed</label><input id="generation-seed" type="number" min="0" step="1" value="42"></div></details></div><div class="field-line camera-field"><select id="views" required aria-label="Camera preset"><option value="6">6 cameras</option><option value="8">8 cameras</option><option value="12">12 cameras</option><option value="16">16 cameras</option><option value="18">18 cameras</option><option value="24">24 cameras</option><option value="36">36 cameras</option></select></div>
 
-<p id="camera-summary" class="hint"></p><label for="output-kind">Output</label><select id="output-kind"><option value="4dgs">4D scene</option><option value="videos">Multi-view videos</option></select><button type="submit" id="generate" class="primary wide">Generate</button></form>
+<p id="camera-summary" class="hint"></p></div>
+<div class="run-controls"><label for="run-through">Run through</label><select id="run-through"><option value="trim">Trim only</option><option value="pose">Extract pose</option><option value="generate">Generate videos</option><option value="splat" selected>Splat 4DGS</option></select><button type="button" id="generate" class="primary wide">Run pipeline</button><p id="run-note" class="hint" role="status"></p></div>
+</section>
 <section id="batch-progress" aria-label="Generation progress" hidden>
 <details id="batch-details"><summary><span id="batch-status" role="status"></span><span id="batch-detail"></span></summary><select id="active-job" aria-label="Preview chunk" hidden></select><pre id="logs" hidden></pre></details>
 <progress id="batch-meter" aria-label="Chunk generation progress"></progress><div class="batch-actions"><button id="resume-live" type="button" class="quiet" hidden>View live</button><button id="cancel" type="button" class="quiet danger">Stop</button></div></section>
-<section id="saved-results" class="result-controls" aria-labelledby="results-title"><div class="section-title"><h2 id="results-title" tabindex="-1">Results <span id="result-count"></span></h2></div>
-<input id="result-search" type="search" placeholder="Find a result" aria-label="Search results" hidden>
-<div id="result-gallery" aria-label="Saved results"><p class="gallery-empty">Loading results…</p></div>
+<section id="saved-results" class="result-controls" aria-labelledby="results-title"><div class="section-title"><h2 id="results-title" tabindex="-1">Jobs <span id="result-count"></span></h2></div>
+<input id="result-search" type="search" placeholder="Find a job" aria-label="Search jobs" hidden>
+<div id="result-gallery" aria-label="Saved results"><p class="gallery-empty">Loading jobs…</p></div>
 </section>
 </aside>
 <div class="workspace">
 <section id="clip-editor" class="clip-editor" aria-labelledby="clip-title" hidden>
-<div class="editor-heading"><div class="editor-title"><button id="close-clip" type="button" class="quiet" title="Cancel edits and return to the scene" aria-label="Cancel edits and return to the scene">← Back</button><h2 id="clip-title" tabindex="-1">Edit video</h2></div><span class="hint editor-shortcuts">Space to play · I / O to trim</span></div>
+<div class="editor-heading"><div class="editor-title"><h2 id="clip-title" tabindex="-1">Edit video</h2></div><span class="hint editor-shortcuts">Space to play · I / O to trim</span></div>
 <div class="source-stage"><video id="source" muted playsinline preload="metadata" tabindex="0" aria-label="Video preview. Press Space to play or pause."></video><p id="source-error" class="hint" role="status" hidden></p></div>
 <div class="editor-controls">
 <div class="editor-transport"><button id="source-play" type="button" class="quiet transport-play" title="Play / pause (Space)" aria-label="Play preview"><svg class="play-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v16l14-8Z" fill="currentColor"/></svg><svg class="pause-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h4v16H6zm8 0h4v16h-4Z" fill="currentColor"/></svg></button><output id="source-time">0:00.00 / 0:00.00</output><label for="skip-frames">Speed</label><select id="skip-frames" aria-describedby="speed-label"><option value="0">1×</option><option value="1">2×</option><option value="2">3×</option><option value="3">4×</option></select><span id="speed-label" class="hint">Every frame</span>
@@ -39,12 +54,12 @@
 </div></div></div>
 <div class="timeline-caption"><span id="trim-duration" class="hint"></span><span id="overlap-note" class="hint" hidden>Final chunk overlaps to include the end.</span></div>
 </div>
-<div class="editor-footer"><p id="clip-plan-note" role="status">Analyzing video…</p><button type="button" id="use-chunks" class="primary" disabled>Choose cameras →</button></div>
+<div class="editor-footer"><p id="clip-plan-note" role="status">Analyzing video…</p><button type="button" id="use-chunks" class="primary" disabled>Next →</button></div>
 </section>
 
 <div id="message" role="status" aria-live="polite" hidden></div>
 <section class="scene-card layout-preview" id="scene-card">
-<div class="scene-heading"><div class="scene-title"><button id="back-to-results" type="button" class="quiet" hidden>← Results</button><h2 id="scene-title">Your scene</h2><span id="scene-count"></span></div>
+<div class="scene-heading"><div class="scene-title"><select id="stage-chunk" aria-label="Preview chunk" hidden></select><h2 id="scene-title">Your scene</h2><span id="scene-count"></span></div>
 <details id="display-menu" class="editor-menu compact-menu"><summary>Display <span aria-hidden="true">⌄</span></summary><div class="editor-menu-content">
 <label id="sound-label" hidden><input id="sound" type="checkbox">Sound</label>
 <label id="show-4d-label" hidden><input id="show-4d" type="checkbox" checked disabled>4D scene</label><label><input id="show-grid" type="checkbox" checked>Grid</label><label><input id="show-cameras" type="checkbox" checked>Cameras</label><label><input id="show-body" type="checkbox" checked aria-label="Body mesh">Body</label><label><input id="show-videos" type="checkbox" checked>Videos in cameras</label><div class="menu-divider"></div><button id="scene-reset" type="button">Reset view <kbd>R</kbd></button><button id="scene-fullscreen" type="button">Fullscreen</button><a id="download-model" download hidden>Download TSOG ↓</a>
@@ -56,8 +71,8 @@
 <p id="scene-note" class="hint">Add a video to create your first scene.</p></section>
 </div>
 </main>
-<dialog id="delete-job-dialog" aria-labelledby="delete-job-title"><div class="dialog-title"><h2 id="delete-job-title">Delete result?</h2></div>
-<p id="delete-job-name"></p><p class="hint">This permanently deletes all chunks and previews for this result. Your uploaded video is kept.</p>
-<p id="delete-job-error" class="hint error" role="alert" hidden></p><div class="dialog-actions"><button id="keep-job" type="button" autofocus>Keep result</button><button id="delete-job" type="button" class="danger">Delete</button></div></dialog>
+<dialog id="delete-job-dialog" aria-labelledby="delete-job-title"><div class="dialog-title"><h2 id="delete-job-title">Delete job?</h2></div>
+<p id="delete-job-name"></p><p class="hint">This permanently deletes all versions, chunks and previews for this job. Your uploaded video is kept.</p>
+<p id="delete-job-error" class="hint error" role="alert" hidden></p><div class="dialog-actions"><button id="keep-job" type="button" autofocus>Keep job</button><button id="delete-job" type="button" class="danger">Delete</button></div></dialog>
 <script type="importmap">{"imports":{"three":"/three/build/three.module.js","three/addons/":"/three/examples/jsm/"}}</script><script type="module" src="/static/app.js"></script>
 </body></html>

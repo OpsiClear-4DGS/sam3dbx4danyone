@@ -19,32 +19,57 @@ Use `http://YOUR_SERVER_IP:8080` on a network that permits this port. The UI is 
 ssh -N -L 8080:127.0.0.1:8080 user@gpu-host
 ```
 
-Upload one video, then follow **Edit clip → Cameras → Generate**:
+## Job workflow
 
-After [training setup](training.md), the **Output** menu defaults to **4D scene**.
-**Create 4D scene** runs generation followed by foreground preparation and
-FreeTimeGS training for each chunk. **Multi-view videos** retains the generation
-workflow below. Training progress shows optimization steps in the single-chunk
-progress bar. Gaussian playback is part of the existing Three.js scene, with the
-same camera controls and timeline. It appears during training and updates roughly
-every 30 seconds; the latest complete snapshot stays visible while the next loads.
-The final model replaces the preview automatically. There is no separate player
-page, iframe, service or port. **Display → 4D scene** toggles the reconstruction;
-**Display → Download TSOG** saves the finished scene with its embedded audio.
-The download is available even while the model is still loading in the viewer.
-**Display → Sound** enables audio when present; it follows play, pause, seek and
-looping. Older PLY results retain their original download until converted.
+**Add video** immediately creates a persistent job. The task panel has four steps:
+
+| Step | Settings | Saved output |
+| --- | --- | --- |
+| Trim | Range and speed, 1×–4× | Lossless 121-frame chunks and matching audio |
+| Extract pose | FP16 or FP32 | SAM body parameters, mesh and BiRefNet masks |
+| Generate videos | Cameras, Turbo/Base and seed | Calibrated multiview videos |
+| Splat 4DGS | Training steps and points per keyframe | Training snapshots and final TSOG |
+
+Select any step to inspect or configure it. **Run through** chooses the last step
+to execute: select the same step to run it alone, or a later step to continue the
+pipeline. For a fresh upload, configure the steps, select **Trim**, and run through
+**Splat 4DGS**. Select **Generate videos** as the end to skip training. The next
+step is blocked until its required input is ready; missing or outdated inputs are
+explained beside the run control.
+
+Settings save automatically. Every execution creates a new output version with
+its exact settings and upstream version IDs. Changing cameras reuses the selected
+pose and masks; changing training settings reuses the selected videos. The
+**Output version** menu shows the distinguishing settings. Selecting an older
+version restores its matching upstream versions, without deleting any newer
+outputs. Downstream versions that use different inputs are marked **earlier
+inputs**. Editing settings alone does not change existing outputs; run the step
+to apply them. Stopped or failed attempts retain logs and leave completed versions
+available. Select an earlier completed version or rerun the failed step.
+
+Click a gallery result while idle to reopen its task panel, settings and outputs.
+Existing results from the previous UI are adopted in place. Old pose results
+without saved masks recover the masks with BiRefNet on their next generation;
+SAM inference is reused. Missing original uploads or working clips can prevent
+rerunning early steps, while saved generated videos can still be used for training.
+
+During a task, settings and version selection are locked. You can inspect steps,
+browse other results, and return with **Active task**. Browsing another result
+leaves the running job's controls intact. Closing a browser does not cancel work.
+The page restores the active job, or the last job opened in that browser.
+
+## Trim and cameras
 
 1. The editor opens in the main workspace with a large preview and one thumbnail timeline. Drag the timeline edges to trim, click or drag its body to scrub, and click a numbered chunk marker to preview that chunk. The end handle gently snaps near whole-chunk boundaries relative to the selected start and speed; the highlighted handle, selection time and chunk count update together. Move past the small snap zone or hold Alt to trim freely. Keyboard trimming and exact start/end entry in the **…** menu bypass snapping. Snapping applies only while dragging the end handle. End time is exclusive. Use Space to play/pause, I/O to set trim boundaries at the playhead, and arrow keys on the focused playhead or trim handle for fine adjustment (Shift moves ten frames).
 2. Choose **Speed**: 1× keeps every frame, 2× keeps every second frame, 3× keeps every third frame, and 4× keeps every fourth frame. The helper text shows the sampling choice. Kept frames play at the source frame rate. For variable-frame-rate sources, trimming uses decoded presentation timestamps and output uses the reported average frame rate; speed is approximate. The player previews the interval at the selected speed.
 3. The app splits the kept frames into 121-frame chunks. Numbered markers and boundaries show them directly on the timeline. A partial last chunk overlaps the preceding chunk to include the selection's end, without padding or silently dropping it. At least 121 kept frames are required.
-4. Click **Choose cameras**, choose the camera count and review the output total (chunks × cameras). **Generate N videos** submits all chunks. Click the source thumbnail/name in the sidebar to return to editing. **Back** above the editor restores the last confirmed trim, speed and chunk plan. **Reset clip** in the **…** menu restores the full video at original speed. Preview playback is muted.
+4. Use the step buttons to configure pose, cameras and training, or **Next** to advance. Click the source thumbnail to return to Trim. **Reset clip** in the **…** menu restores the full video at original speed. **Jobs** returns to the gallery and keeps the draft. Preview playback is muted.
 
-The launcher decodes the source once into RGB-lossless working chunks, then submits all chunks to the existing queue. Each chunk retains exactly 121 selected source frames. The source frame rate is explicitly preserved through inference (including high-frame-rate inputs), so skipped frames accelerate motion rather than merely lowering output FPS. `job-*/clips/manifest.json` records source indices, trim times, overlap and frame rate. Source audio is trimmed and tempo-adjusted for each chunk, then embedded in its TSOG. Generated camera videos remain silent.
+The launcher decodes the source once into RGB-lossless working chunks, then submits all chunks to the existing queue. Each chunk retains exactly 121 selected source frames. The source frame rate is explicitly preserved through inference (including high-frame-rate inputs), so skipped frames accelerate motion rather than merely lowering output FPS. `job-*/stages/trim-*/clips/manifest.json` records source indices, trim times, overlap and frame rate. Source audio is trimmed and tempo-adjusted for each chunk, then embedded in its TSOG. Generated camera videos remain silent.
 
-One persistent worker runs on each needed visible GPU. Use `CUDA_VISIBLE_DEVICES` before launch to restrict the pool. Only one batch runs through a UI instance at a time. The queue preserves compiled model reuse and restarts failed workers. Chunks generate independently; results are not stitched into a continuous video, and consistency across chunk boundaries is not guaranteed. The API/CLI still accept batches of independent source videos without trim edits.
+One persistent worker runs on each needed visible GPU. Use `CUDA_VISIBLE_DEVICES` before launch to restrict the pool. A shared task lock permits one pipeline at a time per cache directory, including across server instances. The queue preserves compiled model reuse and restarts failed workers. Chunks generate independently; results are not stitched into a continuous video, and consistency across chunk boundaries is not guaranteed. The API/CLI still accept batches of independent source videos without trim edits.
 
-The main sidebar has one source card with Edit/Replace actions, a compact edit summary, Cameras and Generate. The upload drop area is replaced by that card after an upload; output totals appear once on the Generate button. The editor has one primary action; chunk previews share the timeline and secondary controls use an overflow menu. The camera layout fills the workspace without an empty video pane or inactive timeline. Choose the total camera count; the scene preview updates immediately, with elevation rings and yaw spacing chosen automatically. Selecting a preset exits live/result playback and shows the planned cameras; select a saved result to return to playback. Presets:
+The sidebar shows the selected step's settings. Choosing a camera preset updates the layout in the scene immediately. Select an output version to return to its generated cameras. Presets:
 
 | Cameras | Rings | Cameras per ring |
 | --- | --- | --- |
@@ -54,25 +79,35 @@ The main sidebar has one source card with Edit/Replace actions, a compact edit s
 | 24 | 2 | 12 |
 | 36 | 3 | 12 |
 
-One ring uses 15° elevation; two use 0°/30°; three use −15°/15°/45°. Each ring spans 360° with evenly spaced yaw angles, starting at 0°. The **…** menu beside Cameras holds the Turbo/Base selector; camera layout preview updates automatically. The clip workflow preserves source frame rate and seed defaults to 42; custom poses and advanced overrides remain available through the API/CLI. The API's `views` field remains cameras **per ring**, with `pitches` specifying the rings; the UI converts the total accordingly.
+One ring uses 15° elevation; two use 0°/30°; three use −15°/15°/45°. Each ring spans 360° with evenly spaced yaw angles, starting at 0°. The **…** menu beside Cameras holds the Turbo/Base selector and seed; camera layout preview updates automatically. The clip workflow preserves source frame rate and seed defaults to 42; custom poses and advanced overrides remain available through the API/CLI. The API's `views` field remains cameras **per ring**, with `pitches` specifying the rings; the UI converts the total accordingly.
 
 Turbo is the default with full-mode optimizations. Added camera counts, four-view groups and multiple rings are experimental. Six- and 24-camera single rings and an 18-camera/two-ring preset have completed generation runs; other layouts have routing/UI tests only. Multi-ring reconstruction quality has not been evaluated. The 18-camera preset uses six-view groups crossing the nine-camera ring boundary. Base remains selectable. Layout preview shows nominal cameras; the final rig is fitted to body predictions.
 
-Preparation and chunk completion progress appear once in the sidebar while generation runs. Single-clip jobs show a stage label and an activity bar; chunk counts appear only for batches with multiple chunks. Expand the progress summary to choose a chunk and inspect logs. **View live** appears when browsing results has interrupted live following. **Stop** stops the launcher and its GPU workers while preserving completed results. Finished jobs move directly into the gallery and the progress panel disappears. Stopping the server also stops its active batch; closing the browser does not cancel generation. Jobs and previews live in `outputs/ui/` by default; set `--cache_dir=/path/to/shared/results` to use shared storage.
+Progress appears once in the sidebar. Single-chunk runs show a stage label and an activity bar, or training steps during optimization. Chunk counts appear only for multiple chunks. Expand the progress summary for logs and the active chunk selector. **View live** resumes following after manual browsing. **Stop** terminates the queue and GPU workers while preserving completed versions. The task panel stays open after completion.
 
-## View results
+Jobs and previews live in `outputs/ui/` by default; use `--cache_dir=/path/to/shared/results` for shared storage. A job's `job.json` records its source, draft configurations, selected versions, immutable attempt history and active run range. Each attempt has its own `stages/<stage>-<id>/` directory. In-progress attempts abandoned by a process or machine restart are marked interrupted when reopened. A graceful server shutdown stops its own queue; a second viewer does not stop another server's queue.
 
-Completed jobs open and play automatically while following the active generation. On a fresh page, the latest saved result opens automatically. **Results** is a thumbnail gallery in the left sidebar, newest first. Click a card to open its scene; the current result has a highlighted border. Each preview shows three generated camera angles, with the source name, date and view count. Multi-chunk results have a chunk selector directly on the card. The selected scene’s name, camera count and duration appear above the viewer. On small screens the cards form a horizontal scrollable row; opening one scrolls to the scene. The gallery refreshes automatically when jobs change and every 15 seconds, preserving selection and avoiding redraws when nothing changed. Existing external result directories containing `metadata.json` and `cameras.json` can still be opened at launch:
+## Gallery and playback
 
-```bash
-.venv/bin/python app.py --output_dir=/path/to/result
-```
+**Jobs** shows drafts and saved scenes, newest first. Cards with outputs show three generated angles; multi-chunk jobs have a chunk selector. The gallery is hidden while working on a job and refreshes when you return. Search appears for six or more jobs. A card's trash control deletes the whole job, including every version, chunk, training artifact and owned preview. The original upload and model weights are kept. Active jobs cannot be deleted. Deleting an older job does not affect another running task.
 
-Search appears above the gallery when there are six or more saved jobs. New uploads retain their original filenames; older uploads without name records appear as **Video**, distinguished by date and view count. The gallery survives server restarts. It is hidden while uploading, editing, choosing cameras and following a new generation. **← Results** in the scene header returns to saved scenes without discarding the prepared clip or stopping generation. The gallery returns automatically when that generation finishes; Back from the editor restores the screen you came from.
+External result folders can be viewed using `--output_dir=/path/to/result`; only owned jobs have task controls and gallery deletion.
 
-The trash icon on each card opens a confirmation showing its name, chunk count and saved file size. **Delete** permanently removes that job's results, prepared chunks, logs and owned previews, including every chunk. The original upload and model weights are retained. Running and unfinished jobs cannot be deleted through this control, and paths outside the UI's own job directories are never deletion targets. Deleting the displayed job opens the next result; deleting the last one clears playback. A different active generation job continues normally. Manually opened external result folders are viewable but are not managed/deleted by the gallery.
+Gaussian playback shares the Three.js scene, cameras and timeline. The first training snapshot appears near step 100, with updates about every 30 seconds, followed by the final model. **Display → Download TSOG** saves the completed container, even before it has loaded into WebGL. **Display → Sound** enables embedded audio and follows play, pause, seek and looping. Older PLY outputs retain their download until converted.
 
-The API exposes `GET /api/jobs` for completed batches, `GET /api/jobs/{job_id}/thumbnail?index=0` for a chunk's JPEG preview and `DELETE /api/jobs/{job_id}` for a completed batch. Thumbnails decode one frame from at most three views on CPU and cache a 480 × 288 JPEG; browsing the gallery does not export playback videos or load models. Playback copies and thumbnails are grouped under `previews/job-<id>/`; matching older playback caches are adopted when results open. Upload names are stored beside their uploads and in each job's `ui.json`, separately from the generation request.
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /api/uploads` | Save video and create a job; returns `job_id` |
+| `GET /api/jobs` | Gallery, including drafts |
+| `GET /api/jobs/{id}` | Configurations, versions, dependencies and active task |
+| `PATCH /api/jobs/{id}` | Save `{configs: {stage: settings}}` |
+| `POST /api/jobs/{id}/run` | Execute `{start, through, configs}` using `trim`, `pose`, `generate`, `splat` |
+| `POST /api/jobs/{id}/select` | Select `{run_id}` and its upstream versions |
+| `GET /api/jobs/{id}/stage?stage=pose&chunk=0&run=…` | View a particular stage attempt |
+| `GET /api/jobs/{id}/training?chunk=0&run=…` | Training progress and immutable model URL |
+| `DELETE /api/jobs/{id}` | Delete an inactive owned job |
+
+Thumbnail and playback caches are grouped under `previews/job-<id>/`. Model URLs pin their training run, so changing versions cannot change an in-flight download. The legacy batch submission endpoint and CLI remain compatible.
 
 The Three.js scene shows calibrated cameras with generated video planes and an adjacent selected-camera pane. Both use the same browser video elements. New results include the animated SAM 3D Body MHR mesh (18,439 vertices and 36,874 triangles), in the same canonical coordinates as the cameras. This is the fitted, untextured body surface; clothing, hair and scene surfaces still require reconstruction. The mesh appears only in the 3D scene. Older joint-only results retain their skeleton, and results without saved geometry show cameras and videos.
 
@@ -98,4 +133,12 @@ Run `.venv/bin/python -m unittest discover -s tests` for the CPU and mocked-infe
 
 The tests cover frame-exact trimming and lossless chunk encoding, GPU queue handoff, saved-result management, camera calibration, progressive previews, mesh serialization and protection of source/model files during deletion. Browser validation covers native mouse/touch trimming, snap bypass, keyboard editing, saved scenes, shared-clock playback, all menus, and layouts from 320 to 1440 pixels wide. Browser checks use disposable results and mocked generation where needed; they do not constitute a new GPU generation benchmark. Test media and screenshots are kept outside the source distribution.
 
-An observed six-camera UI pipeline run completed in 411.20 seconds on one L40S, peaking at 20.71 GiB, with TensorRT FP16 SAM, compiled Turbo and the full VAE. It produced 121-frame, 704 × 1280, 25 FPS videos. The body scene appeared after preprocessing, and completed camera videos appeared progressively. Frustum vertices reprojected within 0.001 pixel of the saved calibration. See [performance and validation limits](performance.md) for other measurements.
+An earlier six-camera UI pipeline run completed in 411.20 seconds on one L40S, peaking at 20.71 GiB, with TensorRT FP16 SAM, compiled Turbo and the full VAE. It produced 121-frame, 704 × 1280, 25 FPS videos. The body scene appeared after preprocessing, and completed camera videos appeared progressively. Frustum vertices reprojected within 0.001 pixel of the saved calibration. See [performance and validation limits](performance.md) for other measurements.
+
+The versioned workflow was exercised on an L40S with a real clip: trim 1.88 s,
+pose 31.42 s, six-view Turbo generation from saved pose 377.11 s. Starting directly
+at Splat 4DGS then produced a TSOG in 133.42 s using 501 steps and 4,096 points per
+keyframe. That shortened training run validates integration, not reconstruction
+quality. The default remains 30,000 steps and 32,768 points per keyframe. Browser
+checks also cover draft restoration, independent trim execution, version lineage,
+pose-only preview, TSOG download and layout widths 320–1440 pixels.

@@ -29,8 +29,9 @@ and `atempo` is required to preserve source audio.
 
 ## Run
 
-In the UI, **Create 4D scene** generates and trains each chunk. Choose
-**Multi-view videos** to stop after generation. The model plays directly in
+In the job panel, run through **Splat 4DGS** to generate and train each chunk.
+Select **Splat 4DGS** to train directly from an existing generation version, or
+change its settings and rerun it. End at **Generate videos** to skip training. The model plays directly in
 the existing Three.js viewer, sharing its timeline, camera controls and body
 mesh. **Display → 4D scene** controls visibility; **Display → Download TSOG**
 saves the completed container. **Display → Sound** enables its embedded audio.
@@ -46,7 +47,9 @@ saves the completed container. **Display → Sound** enables its embedded audio.
 .venv/bin/python train_4dgs.py --result_dir=data/fdanyone/video --gpu_id=0
 ```
 
-Each queue slot generates and trains its chunk on the same GPU. Generation
+The CLI queue generates and trains each chunk on the same GPU. The UI queues
+all chunks of each selected stage before advancing to the next stage; a chunk
+may use a different GPU in its next stage. Generation
 weights are released first; the isolated trainer sees only that GPU's UUID.
 Other GPUs process other chunks. A single scene does not span multiple GPUs,
 and the generation VRAM cap does not apply to training.
@@ -60,8 +63,10 @@ commands accept `--training_steps`; `train_4dgs.py` accepts `--steps` and
 
 The default destination is `<result>/training`, which is never overwritten.
 Failures preserve generated views, logs and partial training previews. Retry
-with a new `--output_dir`; custom output directories are outside gallery
-management. Each chunk is an independent model; overlap does not stitch scenes.
+with a new `--output_dir`; CLI custom output directories are outside gallery
+management. UI training attempts instead live under
+`job-*/stages/splat-*/<chunk>/training`, and every version remains available in
+the job panel and its download URLs. Each chunk is an independent model; overlap does not stitch scenes.
 
 ## Training contract
 

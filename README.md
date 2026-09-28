@@ -8,7 +8,7 @@
 
 Generate synchronized multi-view videos from one person's input video using **SAM 3D Body + BiRefNet, four-step Turbo, and the full Wan VAE**, then train an animated Gaussian scene with **FreeTimeGsVanilla**. This project adapts [4DAnyone](https://github.com/ant-research/4DAnyone) with a SAM 3D Body preprocessing pipeline, a GPU job queue, and an interactive Three.js viewer.
 
-![sam3dbx4danyone UI showing the results gallery, an animated SAM 3D Body mesh, an 18-camera rig with video planes, and the selected camera video](docs/assets/ui-screenshot.png)
+![sam3dbx4danyone UI showing versioned job controls, an animated SAM 3D Body mesh, an 18-camera rig with video planes, and the selected camera video](docs/assets/ui-screenshot.png)
 
 *The current viewer with an 18-camera generated result and its fitted SAM 3D Body mesh.*
 
@@ -60,7 +60,9 @@ uv sync --extra trt --extra gui
 
 Open `http://127.0.0.1:8080` to upload a video, trim and speed it up, split it into chunks, choose cameras, run the chunks across GPUs and inspect results in the Three.js camera scene adapted to SAM 3D Body. The interface uses plain HTML/JavaScript and FastAPI, with no Gradio. See [UI usage](docs/ui.md) for remote access and saved results.
 
-With the training environment installed, **4D scene** is the default UI output. **Create 4D scene** generates views, preserves their soft foreground alpha, and trains FreeTimeGS with explicit opacity supervision and matching random backgrounds. The model appears in the existing viewer during training and updates about every 30 seconds. Playback, cameras and the body mesh share one timeline; **Display** controls visibility and model download. Choose **Multi-view videos** to stop after generation. CLI generation remains opt-in for training:
+Adding a video creates a persistent job with **Trim → Extract pose → Generate videos → Splat 4DGS**. Configure each step, choose a start step and **Run through** a later step, or run only the selected step. Every run keeps its settings and input versions; camera changes reuse pose, and training changes reuse videos. Click a gallery result to reopen its task panel while idle.
+
+With the training environment installed, the default end step is **Splat 4DGS**. Training preserves soft foreground alpha, uses explicit opacity supervision and matching random backgrounds, and streams model previews into the existing viewer about every 30 seconds. Playback, cameras and body mesh share one timeline; **Display** controls visibility, audio and TSOG download. Choose **Generate videos** as the last step to stop before training. CLI generation remains opt-in for training:
 
 ```bash
 .venv/bin/python inference.py --video_path=video.mp4 --train_4dgs=True

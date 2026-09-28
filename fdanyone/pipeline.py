@@ -14,7 +14,7 @@ from fdanyone.assets import (CHECKPOINT, HF_REPO_ID, HF_REVISION, SAM3D_REVISION
     SAM3D_HF_REPO_ID, SAM3D_HF_REVISION, resolve_checkpoint, resolve_base_assets)
 from fdanyone.config import INFERENCE, resolve_execution_profile
 from fdanyone.device import CUDA_ALLOCATOR_CONF, select_cuda_devices
-from fdanyone.download import ensure_example_video, ensure_models, ensure_sam3d, ensure_turbo
+from fdanyone.download import ensure_example_video, ensure_models, ensure_sam3d, ensure_turbo, ensure_foreground_model
 from fdanyone.errors import ConfigurationError
 from fdanyone.io import AtomicResultDirectory, remove_tree, write_json, link_or_copy_file
 from fdanyone.video import decode_canonical_clip, validate_required_video_codecs, verify_lossless_video, write_motion_video
@@ -66,7 +66,7 @@ def run_pipeline(*, video_path, data_dir, model_dir, checkpoint_path, gpu_ids,
                  start_time, target_fps, seed, views_per_layer, layer_pitches,
                  start_yaw, yaw_span, views_per_group, enable_rcp, enable_tcr,
                  execution_profile, motion_backend="auto", motion_precision="fp16", turbo=False,
-                 compile_dit=True):
+                 compile_dit=True, pose_dir=None):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
     started = time.monotonic()
     if seed < 0:
@@ -112,7 +112,8 @@ def run_pipeline(*, video_path, data_dir, model_dir, checkpoint_path, gpu_ids,
         write_json(request, dict(working_video=str(working), clip_metadata=str(clip_metadata),
             output_dir=str(preprocessing), model_dir=str(models), source=str(source),
             device=devices[0], backend=motion_backend, precision=motion_precision,
-            view_plan=plan.to_dict(), process_vram_limit_bytes=execution.process_vram_limit_bytes))
+            view_plan=plan.to_dict(), process_vram_limit_bytes=execution.process_vram_limit_bytes,
+            saved_pose_dir=str(Path(pose_dir).resolve()) if pose_dir else None))
         subprocess.run([sys.executable, "-m", "fdanyone.motion.worker", str(request)],
             check=True, env=_worker_environment())
         from fdanyone.skeleton.pipeline import Conditioning
@@ -143,3 +144,28 @@ def run_pipeline(*, video_path, data_dir, model_dir, checkpoint_path, gpu_ids,
         return {"result_dir": str(destination), **report}
     finally:
         _discard_scratch(scratch)
+
+
+def extract_pose(*, video_path, output_dir, model_dir="models", target_fps="auto", precision="fp16", start_time=0):
+    """Save camera-independent SAM pose and BiRefNet masks for later generation."""
+    models = Path(model_dir).expanduser().resolve()
+    ensure_foreground_model(models)
+    source = ensure_sam3d(models)
+    clip = decode_canonical_clip(video_path, num_frames=INFERENCE.num_frames,
+        start_time=start_time, fps=None if str(target_fps).lower() == "auto" else target_fps)
+    output = Path(output_dir).resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".pose-", dir=output.parent) as temporary:
+        scratch = Path(temporary)
+        metadata = scratch / "canonical_clip.json"
+        clip.write_metadata(metadata)
+        working = write_motion_video(clip, scratch / "canonical_clip.mp4")
+        with AtomicResultDirectory(output) as work:
+            request = scratch / "request.json"
+            write_json(request, dict(working_video=str(working), clip_metadata=str(metadata),
+                output_dir=str(work), model_dir=str(models), source=str(source), device="cuda:0",
+                backend="auto", precision=precision, pose_only=True,
+                process_vram_limit_bytes=resolve_execution_profile("full").process_vram_limit_bytes))
+            subprocess.run([sys.executable, "-m", "fdanyone.motion.worker", str(request)],
+                check=True, env=_worker_environment())
+    return {"pose_dir": str(output)}

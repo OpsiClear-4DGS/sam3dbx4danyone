@@ -33,6 +33,7 @@ def inference(
     compile_dit: bool = True,
     train_4dgs: bool = False,
     training_steps: int = 30_000,
+    pose_dir: str | None = None,
 ) -> dict:
     """Generate synchronized target-view videos from one monocular video.
 
@@ -72,6 +73,7 @@ def inference(
             False selects the eager reference; queued videos reuse warmed code.
         train_4dgs: Train a foreground FreeTimeGS scene after video generation.
         training_steps: Optimizer steps for each independent 4DGS chunk.
+        pose_dir: Saved SAM pose and foreground masks for this exact clip.
     """
 
     from fdanyone.config import resolve_execution_profile
@@ -120,6 +122,7 @@ def inference(
         motion_precision=motion_precision,
         turbo=turbo,
         compile_dit=compile_dit,
+        pose_dir=pose_dir,
     )
     if train_4dgs:
         from fdanyone.reconstruction import train_result
