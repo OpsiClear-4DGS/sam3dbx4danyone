@@ -18,7 +18,7 @@ The project history starts with a single release snapshot. This does not change 
 ## FreeTimeGsVanilla training and player
 
 - Source: <https://github.com/OpsiClear-4DGS/FreeTimeGsVanilla>
-- Pinned submodule: `third_party/FreeTimeGsVanilla`, revision `f0535336c6bf1e353eac875e93fdde106d0ec48b`
+- Pinned submodule: `third_party/FreeTimeGsVanilla`, revision `e782417a574fd9a5a81634bf4a92742e91107a8e`
 - License: GNU AGPL version 3, retained in the [submodule LICENSE](../third_party/FreeTimeGsVanilla/LICENSE).
 - The trainer and the FTGS player's parser and sorter are used directly from
   that submodule. `fdanyone/space/static/gaussian-shaders.js` adapts the player's
@@ -31,6 +31,21 @@ The project history starts with a single release snapshot. This does not change 
   in a separate environment. The Python 3.11 dependency inventory in this project
   does not describe that separate environment. No trainer weights are copied
   into this repository. See [integration details](training.md).
+
+TSOG v4 packaging uses the original [Xiaomi Research encoder](https://github.com/xiaomi-research/tsog)
+as the `third_party/tsog` submodule at `a58102d0489a68c4f7e18e5e1ddaf613256417dd`,
+under its [Clear BSD license](../third_party/tsog/LICENSE), also retained in
+[TSOG_LICENSE](../third_party/licenses/TSOG_LICENSE). The encoder's npm lockfile
+pins PlayCanvas splat-transform 0.14.2 and its other dependencies; their licenses
+remain in their installed packages. A copy of PlayCanvas's MIT license is in
+[SPLAT_TRANSFORM_LICENSE](../third_party/licenses/SPLAT_TRANSFORM_LICENSE).
+The Python dependency inventory does not cover these separate Node dependencies.
+
+The browser reuses the FreeTimeGsVanilla TSOG decoder and audio clock. Its
+[TSOG attribution and license notices](../third_party/FreeTimeGsVanilla/player/THIRD_PARTY.md)
+remain in the submodule. TSOG is by Shady Gmira, Evangelos Alexiou, Emmanouil
+Potetsianakis and Emmanuel Thomas; source and paper are linked in the
+[format documentation](../third_party/FreeTimeGsVanilla/player/TSOG.md).
 
 Brush (`ArthurBrussee/brush`, Apache-2.0), reviewed at
 `6378a76add3b93501abb55c2dc08d71688537679`, was a reference for transparent-alpha

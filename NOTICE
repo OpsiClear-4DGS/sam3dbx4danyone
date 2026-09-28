@@ -18,6 +18,11 @@ GNU AGPL version 3 license and original attribution (see its LICENSE/README).
 Its FTGS parser and sorter are reused directly; the shaders adapted for the
 integrated Three.js viewer retain their source revision and AGPL attribution
 in fdanyone/space/static/gaussian-shaders.js.
+TSOG v4 export uses Xiaomi Research's original encoder (Clear BSD), pinned at
+a58102d0489a68c4f7e18e5e1ddaf613256417dd in third_party/tsog. Browser decoding
+and audio playback reuse FreeTimeGsVanilla; its player/THIRD_PARTY.md retains
+TSOG authorship and the Xiaomi/PlayCanvas licenses. Root copies of the Clear
+BSD and PlayCanvas MIT licenses are retained under third_party/licenses.
 Brush's transparent-alpha training mode was a methodological reference for
 foreground opacity supervision. No Brush code or assets are bundled; see
 docs/THIRD_PARTY_NOTICES.md for its source revision and attribution.

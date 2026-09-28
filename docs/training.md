@@ -10,6 +10,8 @@ scene initialized from the SAM body mesh.
 ```bash
 git submodule update --init --recursive
 uv sync --locked --project third_party/FreeTimeGsVanilla
+npm ci --ignore-scripts --prefix third_party/tsog
+npm run build --prefix third_party/tsog
 ```
 
 Follow the submodule's CUDA/compiler requirements for gsplat, fused-ssim and
@@ -21,13 +23,17 @@ To reuse a compatible environment, set `FDANYONE_FREETIMEGS_PYTHON` to its
 Python executable. Code always comes from this project's submodule. The
 runtime check imports the actual trainer and verifies CUDA before generation.
 LPIPS may download AlexNet weights into the trainer's Torch cache on first use.
+Final packaging uses Node.js 22+ and the pinned original TSOG v4 encoder with
+WebGPU/Vulkan. Its dependencies are fixed by its npm lockfile. FFmpeg with AAC
+and `atempo` is required to preserve source audio.
 
 ## Run
 
 In the UI, **Create 4D scene** generates and trains each chunk. Choose
 **Multi-view videos** to stop after generation. The model plays directly in
 the existing Three.js viewer, sharing its timeline, camera controls and body
-mesh. **Display → 4D scene** controls visibility; **Download 4D model** saves it.
+mesh. **Display → 4D scene** controls visibility; **Display → Download TSOG**
+saves the completed container. **Display → Sound** enables its embedded audio.
 
 ```bash
 # Generate and train one video, or process a queue.
@@ -44,6 +50,9 @@ Each queue slot generates and trains its chunk on the same GPU. Generation
 weights are released first; the isolated trainer sees only that GPU's UUID.
 Other GPUs process other chunks. A single scene does not span multiple GPUs,
 and the generation VRAM cap does not apply to training.
+The reference TSOG encoder selects its own WebGPU device, independently of
+`CUDA_VISIBLE_DEVICES`. Final packaging is serialized across workers on this
+host; generation and training retain their assigned CUDA devices.
 
 The default is 30,000 steps with 32,768 mesh samples per keyframe. Generation
 commands accept `--training_steps`; `train_4dgs.py` accepts `--steps` and
@@ -104,17 +113,49 @@ training/
     sparse/0/{cameras,images,points3D}.bin
   normalization.json                   # canonical ↔ training coordinates
   ckpts/ckpt_29999.pt
-  scene.ftgs.ply                       # complete animated model and SH bands
+  scene.tsog                           # packaged continuous 4DGS, timing and audio
   previews/step-*.ftgs.ply             # temporary live snapshots
   cfg.yml, stats/, tb/, videos/
 ```
 
 `status.json` records the trainer revision and source hashes. Use
-`normalization.json` with external tools: the PLY uses normalized training
+`normalization.json` with external tools: the model uses normalized training
 coordinates. The integrated viewer reuses the submodule's parser/sorter and
 adapts its shaders to Three.js. It preserves source FPS and the complete time
 range, but is not pixel-identical to CUDA. The trainer's optional trajectory
-video may show a shorter interval than the complete animated PLY.
+video may show a shorter interval than the complete animated container.
+
+TSOG retains every Gaussian and SH3, with 16-bit motion and ten codebook
+clustering iterations. It is quantized, not lossless. Live previews remain
+temporary PLYs so packaging does not interrupt optimization; the final staging
+PLY is removed after successful TSOG publication. The checkpoint retains the
+original trained parameters. Failed packaging preserves both checkpoint and
+staging PLY and does not mark the job complete.
+
+When the source has audio, the first track is trimmed to the first and last
+sampled frames, tempo-adjusted without changing pitch, and preserved as AAC
+192 kbit/s in `<result>/audio.m4a`. Prepared chunk audio is reused without a
+second encoding. TSOG embeds it as `audio/track.m4a`, together with the player's
+optional `playback` and `audio` metadata. FPS and duration `(frames-1)/fps`
+preserve the normalized animation endpoints. VFR input uses an average tempo
+over each selected span, matching its first and last frames; within-span timing
+can vary with the source's frame timestamps. Audio gaps become silence; silent
+videos have no audio entry. Generated camera videos remain silent.
+
+The viewer synchronizes embedded audio with playback, pause, seek and looping;
+sound starts muted until enabled. Audio metadata is a FreeTimeGsVanilla player
+extension, so other TSOG viewers may ignore it. See the [container metadata
+contract](../third_party/FreeTimeGsVanilla/player/TSOG.md#audio-and-playback-metadata).
+
+To convert an older completed result without retraining (the original PLY is
+retained), run:
+
+```bash
+.venv/bin/python -m fdanyone.reconstruction.tsog /path/to/fdanyone/clip
+```
+
+Any existing `audio.m4a` is included. Legacy runs that discarded source audio
+need that track recovered from the original upload before conversion.
 
 ## Measured quality and limits
 
@@ -145,6 +186,12 @@ generation and the initial runtime check. The last live snapshot took 0.24 s
 to export. Both comparison videos decoded as 121 H.264 frames at 25 FPS.
 Full-model browser playback, frame scrubbing, visibility, failed-download
 recovery, cancellation on result changes and 320–1440 px layouts passed.
+
+TSOG packaging of that same 819,200-Gaussian model took **44.81 s**, reducing
+219.55 MB to **20.62 MB** (10.65× smaller). Across the same 90 camera/frame pairs,
+TSOG versus original renders measured **46.95 dB PSNR / 0.99756 SSIM**; target
+reconstruction PSNR changed from 28.55 to **28.43 dB**. These measurements exclude
+audio; the tested source video has no audio stream.
 
 The initial surface is a fitted body. Hair, loose clothing and accessories
 must be learned from generated views, whose consistency, motion errors and

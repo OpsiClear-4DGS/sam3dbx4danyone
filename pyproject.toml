@@ -79,3 +79,4 @@ sageattention = { path = "wheels/sageattention-2.2.0-cp311-cp311-linux_x86_64.wh
 "fdanyone.vendor.diffsynth" = ["LICENSE", "UPSTREAM.md", "UPSTREAM.patch", "VENDORED_FILES.txt"]
 
 "fdanyone.space" = ["UPSTREAM.md", "static/*"]
+"fdanyone.reconstruction" = ["*.mjs"]

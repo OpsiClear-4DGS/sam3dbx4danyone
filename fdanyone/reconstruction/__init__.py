@@ -46,6 +46,8 @@ def worker_environment(gpu_uuid=None):
 
 def check_runtime(*, probe=False):
     python = runtime()
+    from .tsog import encoder_runtime
+    encoder_runtime(probe=probe)
     if probe:
         with tempfile.TemporaryDirectory(prefix='fdanyone-ftgs-check-') as temporary:
             request = Path(temporary)/'check.json'
@@ -140,10 +142,17 @@ def train_result(result_dir, *, model_dir='models', output_dir=None, gpu_id=0,
                                env=worker_environment(gpu_uuid), stdout=log, stderr=subprocess.STDOUT, check=True)
             if not (output/'scene.ftgs.ply').is_file() or not (output/'ckpts'/f'ckpt_{steps-1}.pt').is_file():
                 raise ConfigurationError('FreeTimeGS finished without a checkpoint and animated model.')
-            update(status='completed', stage='completed', step=steps, model='scene.ftgs.ply',
+            from .tsog import export_tsog
+            update(stage='packaging 4D scene', step=steps)
+            with (output/'train.log').open('a') as log:
+                audio = result/'audio.m4a'
+                container = export_tsog(output/'scene.ftgs.ply', output/'scene.tsog', fps=manifest['fps'],
+                                        audio=audio if audio.is_file() else None, log=log)
+            update(status='completed', stage='completed', step=steps, model='scene.tsog', container=container,
                    checkpoint=f'ckpts/ckpt_{steps-1}.pt')
             from .training_preview import clear_previews
             clear_previews(output)
+            (output/'scene.ftgs.ply').unlink(missing_ok=True)
     except BaseException as exc:
         cancelled = isinstance(exc, (KeyboardInterrupt, SystemExit))
         update(status='cancelled' if cancelled else 'failed', error=str(exc))

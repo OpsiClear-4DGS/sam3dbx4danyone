@@ -245,7 +245,9 @@ class JobManager:
                     job['training'] = training
             active = [j['training'] for j in data['jobs'] if j.get('status') == 'running' and j.get('training')]
             if active:
-                data['stage'] = 'training' if any(t['stage'] == 'training' for t in active) else 'preparing training views'
+                stages = {t.get('stage') for t in active}
+                data['stage'] = next((s for s in ('training', 'preparing training views', 'packaging 4D scene')
+                                      if s in stages), 'training')
             paths = [self.directory/'launcher.log'] + [Path(j['log']) for j in data['jobs']]
             chunks = []
             for path in paths:

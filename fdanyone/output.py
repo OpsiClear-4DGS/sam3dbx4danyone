@@ -178,6 +178,9 @@ def export_result(
     if generated.parallelism is not None:
         generation_metadata["parallelism"] = generated.parallelism
 
+    from fdanyone.audio import export_clip_audio
+    audio = export_clip_audio(clip, root/'audio.m4a')
+
     metadata = {
         "input": {
             "filename": clip.source_path.name,
@@ -207,6 +210,9 @@ def export_result(
         "runtime": _runtime_metadata(generated.device),
     }
     write_json(root / "cameras.json", _camera_rig_payload(camera_payload, camera_records))
+    if audio is not None:
+        metadata['audio'] = {'file': audio.name, 'mime_type': 'audio/mp4',
+                             'duration': (len(clip.frames)-1)/float(clip.fps)}
     write_json(root / "metadata.json", metadata)
     return {
         "attention_backend": attention_backend,

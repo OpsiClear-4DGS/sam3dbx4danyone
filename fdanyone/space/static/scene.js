@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {BodyMesh} from '/static/body.js';
 import {GaussianScene} from '/static/gaussians.js';
+import {AudioTrack} from '/ftgs/audio.js';
 
 const Y = new THREE.Vector3(0,1,0);
 const color = rgb => new THREE.Color().setRGB(...rgb.map(v=>v/255),THREE.SRGBColorSpace);
@@ -18,8 +19,9 @@ function ready(video) {
 }
 
 export class SceneViewer {
-  constructor(host,{onTime,onSelect,onError,onTraining=()=>{}}) {
+  constructor(host,{onTime,onSelect,onError,onTraining=()=>{},onAudio=()=>{}}) {
     this.host=host;this.onTime=onTime;this.onSelect=onSelect;this.onError=onError;this.dirty=true;
+    this.onAudio=onAudio;this.muted=true;
     this.renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});
     this.renderer.setPixelRatio(Math.min(devicePixelRatio,2));this.renderer.outputColorSpace=THREE.SRGBColorSpace;
     host.replaceChildren(this.renderer.domElement);this.renderer.domElement.tabIndex=0;
@@ -40,6 +42,11 @@ export class SceneViewer {
       }
       host.dataset.model=state.loaded?'ready':this.has4d?'ready':state.loading?'loading':'error';
       if(state.loaded&&state.info)host.dataset.modelVersion=state.info.version;
+      if(state.loaded&&!state.error&&state.info){
+        this.audio?.destroy();this.audio=null;
+        if(state.audio)this.audio=new AudioTrack(state.audio.blob,()=>this.onAudio(this.audio?.state??null));
+        this.syncAudio(true);this.onAudio(this.audio?.state??null);
+      }
       onTraining(state);
     });
     this.scene.add(this.gaussians);
@@ -64,6 +71,7 @@ export class SceneViewer {
   clear() {
     this.meshAbort?.abort();this.meshAbort=null;this.meshUrl=null;
     this.setPlaying(false);
+    this.audio?.destroy();this.audio=null;this.onAudio(null);
     for(const e of this.entries){if(e.video){e.video.pause();e.video.removeAttribute('src');e.video.load();e.video.remove();}}
     this.entries=[];this.pickables=[];this.clearGroup(this.rig);this.clearGroup(this.body);this.clearGroup(this.planes);this.lastFrame=-1;this.time=0;
     this.bodyMesh=null;this.bones=null;this.joints=null;
@@ -71,6 +79,10 @@ export class SceneViewer {
     delete this.host.dataset.model;delete this.host.dataset.modelVersion;this.onTraining({cleared:true});
   }
   setTraining(info) {this.gaussians.setSource(info);}
+  setMuted(value) {this.muted=Boolean(value);this.audio?.retry();this.syncAudio(true);}
+  syncAudio(seek=false) {
+    this.audio?.sync(this.time,{playing:this.playing,playbackRate:1,muted:this.muted,volume:1},seek);
+  }
   requestRender() {this.dirty=true;}
   async setScene(data,urls=[],preserve=false) {
     const oldTime=this.time,oldPlaying=this.playing;
@@ -169,13 +181,14 @@ export class SceneViewer {
     this.lastTick=performance.now();
     if(this.time>=(this.frames-1)/this.fps)this.seek(0);
     try {await Promise.all(clips.map(v=>v.play()));}catch(e){this.playing=false;clips.forEach(v=>v.pause());if(e.name!=='AbortError')this.onError('Playback was blocked by the browser. Click Play to start.');}
+    this.audio?.retry();this.syncAudio(true);
     this.notify();
   }
   seek(frame) {
     this.dirty=true;
     this.time=Math.max(0,Math.min(this.frames-1,frame))/this.fps;
     for(const e of this.entries)if(e.video)e.video.currentTime=this.time;
-    this.lastTick=performance.now();this.updateBody(Math.round(this.time*this.fps));this.notify();
+    this.lastTick=performance.now();this.updateBody(Math.round(this.time*this.fps));this.syncAudio(true);this.notify();
   }
   notify() {this.onTime({frame:Math.min(this.frames-1,Math.floor(this.time*this.fps+1e-5)),frames:this.frames,time:this.time,fps:this.fps,playing:this.playing});}
   tick(now) {
@@ -189,6 +202,7 @@ export class SceneViewer {
       for(const v of clips.slice(1))if(!v.seeking&&Math.abs(v.currentTime-this.time)>1.5/this.fps)v.currentTime=this.time;
       this.updateBody(Math.min(this.frames-1,Math.floor(this.time*this.fps+1e-5)));this.notify();
     }
+    this.syncAudio();
     const moved=this.controls.update();this.camera.updateMatrixWorld();
     this.gaussians.update(this.camera,Math.min(1,Math.max(0,this.time*this.fps/Math.max(1,this.frames-1))));
     if(this.playing||moved||this.dirty||this.gaussians.dirty){

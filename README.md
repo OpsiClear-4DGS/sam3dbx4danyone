@@ -19,6 +19,7 @@ Generate synchronized multi-view videos from one person's input video using **SA
 - Inspect synchronized camera videos and the animated body mesh in 3D.
 - Browse and delete completed results in the gallery; process independent chunks across available GPUs.
 - Train foreground 4D Gaussian scenes with live previews and playback in the same 3D viewer.
+- Download compact TSOG scenes with the source audio trimmed and sped up to match each chunk.
 
 Choose calibrated multi-view videos or a trained foreground 4D Gaussian scene. Each chunk generates and trains independently; scenes are not stitched across chunks. Expanded Turbo layouts and reconstruction quality remain experimental.
 
@@ -44,9 +45,11 @@ For 4DGS training, initialize the pinned [FreeTimeGsVanilla submodule](third_par
 ```bash
 git submodule update --init --recursive
 uv sync --locked --project third_party/FreeTimeGsVanilla
+npm ci --ignore-scripts --prefix third_party/tsog
+npm run build --prefix third_party/tsog
 ```
 
-Training uses Python 3.12 and the submodule's dependencies; generation stays on Python 3.11 / NumPy 2. To reuse an existing training environment, set `FDANYONE_FREETIMEGS_PYTHON=/absolute/path/to/FreeTimeGsVanilla/.venv/bin/python`. See [training setup and data contract](docs/training.md).
+Training uses Python 3.12 and the submodule's dependencies; generation stays on Python 3.11 / NumPy 2. TSOG packaging requires Node.js 22+, WebGPU/Vulkan and FFmpeg for source audio. To reuse an existing training environment, set `FDANYONE_FREETIMEGS_PYTHON=/absolute/path/to/FreeTimeGsVanilla/.venv/bin/python`. See [training setup and data contract](docs/training.md).
 
 ## Interactive UI
 

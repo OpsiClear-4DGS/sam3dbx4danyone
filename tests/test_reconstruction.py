@@ -216,6 +216,24 @@ class TrainingAPITests(unittest.TestCase):
         self.assertEqual(result['training']['preview_step'],101)
         manager.process=None
 
+    def test_tsog_download_uses_published_container_and_supports_ranges(self):
+        output = self.result/'training'
+        (output/'scene.tsog').write_bytes(b'PK\x03\x04packaged model')
+        write_json(output/'status.json', dict(status='completed', model='scene.tsog'))
+        info = self.client.get('/api/jobs/job-012345abcdef/training').json()
+        self.assertEqual(info['format'], 'tsog')
+        response = self.client.get(info['model'], headers={'Range':'bytes=0-3'})
+        self.assertEqual(response.status_code, 206)
+        self.assertEqual(response.content, b'PK\x03\x04')
+        self.assertIn('scene.tsog', response.headers['content-disposition'])
+        if (REPO/'player/tsog.js').is_file():
+            for module in ('model.js','tsog.js','zip.js','webp.js','playback.js','audio.js'):
+                self.assertEqual(self.client.get('/ftgs/'+module).status_code, 200)
+        # A container path in status is never an arbitrary file-serving path.
+        write_json(output/'status.json', dict(status='completed', model='../private.tsog'))
+        response = self.client.get('/api/jobs/job-012345abcdef/model')
+        self.assertEqual(response.content, b'ply\nmodel data')
+
     def test_live_snapshot_and_normalization_cannot_escape_owned_result(self):
         output=self.result/'training'
         preview=output/'previews/step-000000101.ftgs.ply'

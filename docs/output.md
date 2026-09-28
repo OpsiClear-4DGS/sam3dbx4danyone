@@ -56,7 +56,7 @@ skeleton videos remain compact intermediates.
 
 Enable `--train_4dgs=True` to run the pinned FreeTimeGsVanilla submodule after
 generation. It adds `training/` with straight RGBA training frames, COLMAP cameras,
-mesh-derived initialization, checkpoints and `scene.ftgs.ply`; see
+mesh-derived initialization, checkpoints and `scene.tsog`; see
 [training](training.md). Generated views and camera metadata remain unchanged
 and can also be used with external reconstruction tools. Soft alpha supervises
 object opacity, including empty space; RGB and prediction use matching random

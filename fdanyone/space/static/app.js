@@ -46,7 +46,7 @@ function renderBatch(report) {
   const total=report.jobs.length || report.planned_chunks || 0;
   $('batch-progress').hidden=report.status==='completed' || report.status==='idle';
   const training=report.jobs.find(j=>j.status==='running' && j.training?.stage==='training')?.training;
-  $('batch-status').textContent=running?(report.stage==='training'?'Training 4D scene':report.stage==='preparing training views'?'Preparing training views':report.jobs.length?'Generating views':total>1?'Preparing clips':'Preparing video'):'Processing stopped';
+  $('batch-status').textContent=running?(report.stage==='training'?'Training 4D scene':report.stage==='packaging 4D scene'?'Packaging 4D scene':report.stage==='preparing training views'?'Preparing training views':report.jobs.length?'Generating views':total>1?'Preparing clips':'Preparing video'):'Processing stopped';
   $('batch-meter').max=Math.max(1,total);
   if(running && (!report.jobs.length || total===1))$('batch-meter').removeAttribute('value');
   else $('batch-meter').value=done;
@@ -362,6 +362,7 @@ async function showScene(scene, urls = [], preserve = false) {
   $('show-videos').disabled=!urls.some(Boolean);
 }
 $('scene-play').onclick = () => viewer?.setPlaying(!viewer.playing);
+$('sound').onchange = event => viewer?.setMuted(!event.target.checked);
 $('timeline').oninput = event => { const frame=Number(event.target.value); viewer?.setPlaying(false); viewer?.seek(frame); };
 $('scene-reset').onclick = () => viewer?.home();
 $('scene-fullscreen').onclick = () => {if(document.fullscreenElement)document.exitFullscreen();else $('scene-card').requestFullscreen().catch(e=>message(e.message,true));};
@@ -371,6 +372,11 @@ for(const [id,group] of [['show-grid','grid'],['show-cameras','rig'],['show-body
 let trainingWatch=null,liveDirectory='',trainingPollBusy=false,loadedTraining=null;
 function updateTraining(info) {
   trainingWatch=info?.status==='running'?info.watch:null;
+  $('download-model').hidden=!info?.model||info.status!=='completed';
+  if(info?.model){
+    $('download-model').href=info.model;
+    $('download-model').textContent=info.format==='tsog'?'Download TSOG ↓':'Download 4D model ↓';
+  }
   viewer?.setTraining(info);
   if(loadedTraining?.live)trainingNote(info);
 }
@@ -646,6 +652,11 @@ async function initialize() {
         $('download').hidden=!url;if(url)$('download').href=url;
       },
       onError: text => message(text,true),
+      onAudio: state => {
+        $('sound-label').hidden=!state;$('sound').checked=Boolean(state)&&!viewer.muted;
+        if(state?.status==='error')message(state.error,true);
+        if(state?.status==='blocked'){viewer.muted=true;$('sound').checked=false;}
+      },
       onTraining: state => {
         if(state.cleared){
           loadedTraining=null;$('show-4d-label').hidden=true;$('show-4d').disabled=true;$('show-4d').checked=true;$('download-model').hidden=true;
@@ -653,7 +664,6 @@ async function initialize() {
           loadedTraining=state.info;
           $('show-4d-label').hidden=false;$('show-4d').disabled=false;
           $('show-body').checked=viewer.body.visible;
-          $('download-model').hidden=false;$('download-model').href=state.info.model;
           trainingNote(state.info);message('');
         } else if(state.loading&&!loadedTraining){
           $('scene-note').hidden=false;$('scene-note').textContent='Loading 4D scene…';

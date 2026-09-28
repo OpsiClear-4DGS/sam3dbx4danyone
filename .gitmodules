@@ -1,3 +1,6 @@
 [submodule "third_party/FreeTimeGsVanilla"]
 	path = third_party/FreeTimeGsVanilla
 	url = https://github.com/OpsiClear-4DGS/FreeTimeGsVanilla.git
+[submodule "third_party/tsog"]
+	path = third_party/tsog
+	url = https://github.com/xiaomi-research/tsog.git

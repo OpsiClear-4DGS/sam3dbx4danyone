@@ -85,7 +85,7 @@ export class GaussianScene extends THREE.Group {
       try {
         const limit=this.renderer.capabilities.maxTextureSize;
         const mesh=createMesh(data.model,this.loading.info,limit);
-        this.staged={...this.loading,mesh};this.loading=null;this.lastSort='';
+        this.staged={...this.loading,mesh,audio:data.model.audio,worker:this.worker};this.loading=null;this.lastSort='';
       } catch(error){this.fail(error.message);}
     } else if(data.type==='sorted') {
       this.sorting=false;
@@ -99,7 +99,8 @@ export class GaussianScene extends THREE.Group {
         if(this.current){this.remove(this.current.mesh);disposeMesh(this.current.mesh);}
         this.current=target;this.staged=null;this.add(target.mesh);
         this.worker.postMessage({type:'retain',id:target.id});
-        this.onState({loaded:true,info:target.info});
+        this.onState({loaded:true,info:target.info,audio:target.audio});
+        delete target.audio;
         this.startLoad();
       }
     } else if(data.type==='error') {
@@ -125,7 +126,8 @@ export class GaussianScene extends THREE.Group {
       u.viewport.value.copy(this.size);u.focal.value=this.size.y/(2*Math.tan(THREE.MathUtils.degToRad(camera.fov)/2));
       u.time.value=time;u.nearPlane.value=camera.near;u.farPlane.value=camera.far;
     }
-    const target=this.staged||this.current;
+    // A replacement worker has no sort arrays for the retained old model.
+    const target=this.staged||(this.current?.worker===this.worker?this.current:null);
     if(!target||this.sorting||!this.worker)return;
     const view=target.mesh.material.uniforms.view.value.elements;
     const key=`${target.id}:${time}:${view.join(',')}`;

@@ -3,12 +3,14 @@
 The Three.js scene integration, web controls, FastAPI queue adapter and calibrated result reader are maintained in this repository under AGPL-3.0-only. The renderer replaces the previous Rerun integration. The UI header links to the corresponding source repository.
 
 Gaussian playback reuses the parser and animated depth sorter from the pinned
-FreeTimeGsVanilla submodule (`f0535336c6bf1e353eac875e93fdde106d0ec48b`).
+FreeTimeGsVanilla submodule (`e782417a574fd9a5a81634bf4a92742e91107a8e`).
 `static/gaussian-shaders.js` adapts its `player/renderer.js` shaders for Three.js
 attributes, GLSL setup and depth in the shared scene. This adaptation retains
 its AGPL-3.0 license and source attribution. The parser and sorter remain unmodified;
 its [LICENSE](../../third_party/FreeTimeGsVanilla/LICENSE) and original README
 retain the upstream notices.
+Its TSOG decoder and audio clock are reused directly, including the
+[TSOG/PlayCanvas notices](../../third_party/FreeTimeGsVanilla/player/THIRD_PARTY.md).
 
 https://colmapview.github.io/latest/ (v0.14.5, reviewed 2026-09-27) was used as a visual and interaction reference: dark grid, compact scene controls, camera selection and an adjacent image pane. No ColmapView code or assets were copied.
 

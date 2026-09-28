@@ -56,6 +56,18 @@
       "source": "https://github.com/ant-research/4DAnyone/blob/4f66efeea83c641ef7c57da7df9c33c4f3c726e4/LICENSE",
       "sha256": "1c706f0f86f34b3245bdd3f29cadc63aa81616c849bfc197fd4d116a9d90a218",
       "retrieved": "2026-09-28"
+    },
+    {
+      "path": "third_party/licenses/TSOG_LICENSE",
+      "source": "https://github.com/xiaomi-research/tsog/blob/a58102d0489a68c4f7e18e5e1ddaf613256417dd/LICENSE",
+      "sha256": "88c0cc063b1cdc379d54aedb9b6daf23ab598f6ff7c00bd7e5de4d3a3e4e81a2",
+      "retrieved": "2026-09-28"
+    },
+    {
+      "path": "third_party/licenses/SPLAT_TRANSFORM_LICENSE",
+      "source": "https://registry.npmjs.org/@playcanvas/splat-transform/-/splat-transform-0.14.2.tgz!/package/LICENSE",
+      "sha256": "64c7ce249cdb5cb8f704fa3fa680a5344341f31d22015c75e234ae81881d76e2",
+      "retrieved": "2026-09-28"
     }
   ]
 }

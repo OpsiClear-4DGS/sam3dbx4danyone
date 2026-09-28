@@ -260,7 +260,7 @@ def create_app(cache_dir='outputs/ui', model_dir='models', *, video_path=None,
         completed = status.get('status') == 'completed'
         if not completed and (not isinstance(preview_step, int) or preview_step < 1):
             return info
-        relative = 'scene.ftgs.ply' if completed else f'previews/step-{preview_step:09d}.ftgs.ply'
+        relative = final_model(status) if completed else f'previews/step-{preview_step:09d}.ftgs.ply'
         try:
             path = within(output, relative)
             stat = path.stat()
@@ -274,8 +274,12 @@ def create_app(cache_dir='outputs/ui', model_dir='models', *, video_path=None,
         version = f'{stat.st_mtime_ns}-{stat.st_size}'
         info.update(model=model_url+'&v='+version, version=version, live=not completed,
                     preview_step=status.get('steps', 0) if completed else preview_step,
-                    **transforms)
+                    format='tsog' if relative.endswith('.tsog') else 'ftgs-ply', **transforms)
         return info
+
+    def final_model(status):
+        # Old results remain readable; never use an arbitrary path from metadata.
+        return 'scene.tsog' if status.get('model') == 'scene.tsog' else 'scene.ftgs.ply'
 
     def result_training(directory):
         directory = Path(directory).resolve()
@@ -319,11 +323,11 @@ def create_app(cache_dir='outputs/ui', model_dir='models', *, video_path=None,
             else:
                 if status.get('status') != 'completed':
                     raise HTTPException(404, '4D scene is not complete.')
-                relative = 'scene.ftgs.ply'
+                relative = final_model(status)
             directory = manager.job_directory(job_id)
             path = Path(result['directory'])/'training'/relative
             return FileResponse(within(directory, str(path.relative_to(directory))),
-                                media_type='application/octet-stream', filename='scene.ftgs.ply',
+                                media_type='application/octet-stream', filename=Path(relative).name,
                                 headers={'Cache-Control':'private, max-age=3600'})
 
     @app.get('/api/results')
@@ -367,7 +371,7 @@ def create_app(cache_dir='outputs/ui', model_dir='models', *, video_path=None,
     @app.get('/ftgs/{module}')
     def ftgs_module(module: str):
         # Reuse the pinned parser and sorter in our existing Three.js viewer.
-        if module not in ('ftgs.js', 'sort.js'):
+        if module not in ('model.js', 'ftgs.js', 'sort.js', 'tsog.js', 'zip.js', 'webp.js', 'playback.js', 'audio.js'):
             raise HTTPException(404)
         from fdanyone.reconstruction import REPO
         script = REPO/'player'/module

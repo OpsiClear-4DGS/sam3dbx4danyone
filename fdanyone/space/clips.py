@@ -93,10 +93,13 @@ def prepare_chunks(plan, directory):
                 outputs[j].with_suffix('.part.mp4').unlink(missing_ok=True)
         stack.callback(close_pending)
         container = stack.enter_context(av.open(str(source)))
+        has_audio = bool(container.streams.audio)
         stream = container.streams.video[0]
         rotation = _rotation_degrees(stream)
         observed_rotation = None
         for i, frame in enumerate(container.decode(stream)):
+            if i == 0:
+                origin = float(_frame_timestamp(frame, stream, 0))
             if i > chunks[-1]['last']:
                 break
             while next_chunk < len(chunks) and i == chunks[next_chunk]['first']:
@@ -135,5 +138,13 @@ def prepare_chunks(plan, directory):
                     del active[j]
         if active or next_chunk != len(chunks):
             raise ValueError('Source ended before all planned chunks were written.')
+    if has_audio:
+        from fdanyone.audio import extract_audio
+        times = video_index(source)['timestamps']
+        for chunk, target in zip(chunks, outputs, strict=True):
+            # A continuous TSOG spans the first through last sampled frame.
+            extract_audio(source, target.with_suffix('.audio.m4a'),
+                          start=origin+chunk['start'], end=origin+times[chunk['last']],
+                          duration=(INFERENCE.num_frames-1)/float(fps))
     write_json(directory/'manifest.json', plan)
     return [str(p) for p in outputs]
