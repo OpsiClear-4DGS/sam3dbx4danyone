@@ -1,6 +1,18 @@
 # sam3dbx4danyone
 
+[![Code license: AGPL-3.0-only](docs/assets/badges/license.svg)](LICENSE)
+[![Turbo weights: CC BY-NC-SA 4.0](docs/assets/badges/turbo-license.svg)](docs/THIRD_PARTY_NOTICES.md#default-wan22-ti2v-5b-turbo-lora)
+[![Python 3.11](docs/assets/badges/python.svg)](pyproject.toml)
+[![CUDA 12.8](docs/assets/badges/cuda.svg)](wheels/README.md)
+[![Viewer: Three.js](docs/assets/badges/viewer.svg)](docs/ui.md)
+
 Generate synchronized multi-view videos from one person's input video using **SAM 3D Body + BiRefNet, four-step Turbo, and the full Wan VAE**. This project adapts [4DAnyone](https://github.com/ant-research/4DAnyone) with a SAM 3D Body preprocessing pipeline, a GPU job queue, and an interactive Three.js viewer.
+
+![sam3dbx4danyone UI showing the results gallery, an animated SAM 3D Body mesh, an 18-camera rig with video planes, and the selected camera video](docs/assets/ui-screenshot.png)
+
+*The current viewer with an 18-camera generated result and its fitted SAM 3D Body mesh.*
+
+**Topics:** `sam-3d-body` · `birefnet` · `4danyone` · `multi-view-video` · `human-motion` · `threejs`
 
 - Upload, trim with chunk snapping, choose 1×–4× speed, and generate 121-frame chunks.
 - Choose 6, 8, 12, 16, 18, 24 or 36 cameras with predefined elevation rings.
