@@ -57,7 +57,9 @@ function buttons() {
   $('drop-zone').hidden=controls;$('uploads').tabIndex=controls?-1:0;
   const end=$('run-through').value;
   const verb=chosenRun(selectedStage)?'Rerun':'Run';
-  $('generate').textContent=submitting?'Starting…':end===selectedStage?`${verb} ${stageNames[selectedStage]}`:`${verb} ${stageNames[selectedStage]} → ${stageNames[end]}`;
+  const runLabel=submitting?'Starting…':end===selectedStage?`${verb} ${stageNames[selectedStage]}`:`${verb} ${stageNames[selectedStage]} → ${stageNames[end]}`;
+  $('generate-label').textContent=submitting?'Starting…':verb;
+  $('generate').setAttribute('aria-label',runLabel);$('generate').title=runLabel;
   $('run-note').textContent=blocked || (running?'Settings are saved. Wait or stop the active task to reconfigure.':chosenRun(selectedStage)?'Creates a new version. Earlier outputs stay available.':'');
   $('use-chunks').disabled=busy || !clipPlan;
   $('delete-job').disabled=exporting || liveBusy || deletingJob;
@@ -785,7 +787,9 @@ async function initialize() {
     const {SceneViewer}=await import('/static/scene.js');
     viewer=new SceneViewer($('viewer'),{
       onTime: state => {
-        $('scene-play').disabled=state.frames<2; $('scene-play').textContent=state.playing?'Pause':'Play';
+        const playback=$('scene-play'), label=state.playing?'Pause scene':'Play scene';
+        playback.disabled=state.frames<2;playback.classList.toggle('playing',state.playing);
+        playback.setAttribute('aria-label',label);playback.title=`${label} (Space)`;
         $('timeline').disabled=state.frames<2; $('timeline').max=state.frames-1; $('timeline').value=state.frame;
         const stamp=t=>`${Math.floor(t/60)}:${String(Math.floor(t%60)).padStart(2,'0')}`;
         $('scene-time').textContent=`${stamp(state.time)} / ${stamp(state.frames/state.fps)}`;
