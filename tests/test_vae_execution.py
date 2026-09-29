@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
+import numpy as np
 import torch
 
 from fdanyone.config import FULL_EXECUTION
+from fdanyone.errors import FourDAnyoneError
 from fdanyone.model.inference import _target_decode_devices
-from fdanyone.model.vae import VaeExecutor
+from fdanyone.model.loader import load_vae
+from fdanyone.model.vae import VaeExecutor, _rgb_frames
 
 
 class _FakeVae:
@@ -15,16 +21,8 @@ class _FakeVae:
     def __init__(self) -> None:
         self.call = None
 
-    def encode_view(self, value):
-        self.call = ("encode", value)
-        return value
-
     def tiled_encode(self, value, device, tile_size, tile_stride):
         self.call = ("tiled_encode", value, device, tile_size, tile_stride)
-        return value
-
-    def decode_view(self, value):
-        self.call = ("decode", value)
         return value
 
     def tiled_decode(self, value, device, tile_size, tile_stride):
@@ -56,6 +54,7 @@ class VaeExecutionProfileTests(unittest.TestCase):
         executor._encode_view(model, torch.zeros(3, 2, 4, 4), "cpu")
 
         self.assertEqual(model.call[0], "tiled_encode")
+        self.assertEqual(model.call[1].dtype, torch.bfloat16)
         self.assertEqual(model.call[3], (416, 240))
         self.assertEqual(model.call[4], (208, 120))
 
@@ -65,8 +64,55 @@ class VaeExecutionProfileTests(unittest.TestCase):
         executor._decode_view(model, torch.zeros(48, 2, 4, 4), "cpu")
 
         self.assertEqual(model.call[0], "tiled_decode")
+        self.assertEqual(model.call[1].dtype, torch.float16)
         self.assertEqual(model.call[3], FULL_EXECUTION.vae_decode_tile_size)
         self.assertEqual(model.call[4], FULL_EXECUTION.vae_decode_tile_stride)
+
+    def test_rgb_conversion_rounds_clamps_and_preserves_input(self) -> None:
+        values = torch.tensor([-2.0, -1.0, 0.0, 0.5, 1.0, 2.0])
+        video = values.reshape(1, 1, 1, -1).repeat(3, 2, 1, 1)
+        original = video.clone()
+        frames = _rgb_frames(video)
+        self.assertTrue(torch.equal(video, original))
+        self.assertEqual(len(frames), 2)
+        self.assertEqual(frames[0].dtype, np.uint8)
+        self.assertEqual(frames[0][0, :, 0].tolist(), [0, 0, 128, 191, 255, 255])
+
+    def test_nonfinite_pixels_fail_before_video_export(self) -> None:
+        for value in (float('nan'), float('inf'), -float('inf')):
+            with self.subTest(value=value), self.assertRaisesRegex(FourDAnyoneError, 'non-finite'):
+                _rgb_frames(torch.full((3, 1, 2, 2), value))
+
+    def test_decoder_weights_are_not_rounded_through_bf16(self) -> None:
+        class TinyVae(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.model = torch.nn.Module()
+                for name in ('encoder', 'decoder', 'conv1', 'conv2'):
+                    setattr(self.model, name, torch.nn.Linear(1, 1, bias=False))
+
+            @staticmethod
+            def state_dict_converter():
+                return SimpleNamespace(from_civitai=lambda state: state)
+
+            def materialize_normalization(self, device):
+                pass
+
+        weights = {f'model.{name}.weight': torch.full((1, 1), 1.003)
+                   for name in ('encoder', 'decoder', 'conv1', 'conv2')}
+        with patch('torch.load', return_value=weights), patch(
+            'fdanyone.vendor.diffsynth.models.wan_video_vae.WanVideoVAE38', TinyVae
+        ):
+            vae = load_vae(Path('vae.pth'))
+        for name in ('encoder', 'conv1'):
+            self.assertEqual(getattr(vae.model, name).weight.dtype, torch.bfloat16)
+        for name in ('decoder', 'conv2'):
+            actual = getattr(vae.model, name).weight
+            original = weights[f'model.{name}.weight']
+            self.assertEqual(actual.dtype, torch.float16)
+            self.assertTrue(torch.equal(actual, original.half()))
+            self.assertFalse(torch.equal(actual, original.bfloat16().half()))
+            self.assertFalse(actual.requires_grad)
 
 
 

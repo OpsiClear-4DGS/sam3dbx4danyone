@@ -48,7 +48,8 @@ canonical source raster so their projected coordinates remain exact.
 
 The default `full` execution profile publishes `videos/dense/` with
 RGB-lossless H.264 (`libx264rgb`, CRF 0), so decoding the saved target produces
-the exact RGB bytes returned by the VAE. It uses x264's `veryfast` preset;
+the RGB bytes from the full FP16 VAE, rounded to the nearest integer after
+scaling to 0–255. It uses x264's `veryfast` preset;
 presets affect encode work and file size, not decoded RGB values. Proposal and
 skeleton videos remain compact intermediates.
 

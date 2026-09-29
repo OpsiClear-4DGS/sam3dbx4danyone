@@ -39,25 +39,16 @@ class PublishedRcp:
     videos: tuple[Path, ...]
 
 
-@dataclass(frozen=True)
-class _DecodedView:
-    """Host-owned values consumed by publication sinks."""
+def _rgb_frames(video: Tensor) -> tuple[np.ndarray, ...]:
+    """Publish finite decoded pixels with nearest-integer RGB quantization."""
 
-    video: Tensor | None
-    rgb_frames: tuple[np.ndarray, ...]
-
-
-def _bf16_autocast():
     import torch
 
-    return torch.autocast(device_type="cuda", dtype=torch.bfloat16)
-
-
-def _rgb_frames(video: Tensor) -> tuple[np.ndarray, ...]:
-    """Freeze the released CUDA scaling boundary before CPU publication."""
+    if not torch.isfinite(video).all():
+        raise FourDAnyoneError("The FP16 VAE produced non-finite pixels; video export was stopped.")
 
     scaled = (
-        video.detach().float().add_(1.0).mul_(127.5).clamp_(0.0, 255.0).to(device="cpu")
+        video.detach().float().add(1.0).mul_(127.5).clamp_(0.0, 255.0).round_().to(device="cpu")
     )
     return tuple(
         scaled[:, frame_index].permute(1, 2, 0).numpy().astype(np.uint8)
@@ -65,15 +56,11 @@ def _rgb_frames(video: Tensor) -> tuple[np.ndarray, ...]:
     )
 
 
-def _save_jpegs(video: Tensor, camera_id: int, root: Path) -> Path:
-    import torchvision.transforms.functional as transform
-
+def _save_jpegs(frames: tuple[np.ndarray, ...], camera_id: int, root: Path) -> Path:
     frame_dir = root / f"{camera_id:06d}"
     frame_dir.mkdir(parents=True, exist_ok=False)
-    for frame_index in range(video.shape[1]):
-        normalized = video[:, frame_index].float().mul_(0.5).add_(0.5).clamp_(0.0, 1.0)
-        image = transform.to_pil_image(normalized)
-        image.save(
+    for frame_index, frame in enumerate(frames):
+        Image.fromarray(frame).save(
             frame_dir / f"{frame_index:06d}.jpg", quality=INFERENCE.rcp_jpeg_quality
         )
     return frame_dir
@@ -224,32 +211,25 @@ class VaeExecutor:
     def _encode_view(self, model: WanVideoVAE38, video: Tensor, device: str) -> Tensor:
         import torch
 
-        if self.execution.tiled_vae:
-            tile_size = tuple(
-                size * model.upsampling_factor for size in self.execution.vae_tile_size
-            )
-            tile_stride = tuple(
-                stride * model.upsampling_factor
-                for stride in self.execution.vae_tile_stride
-            )
-            batched = video.unsqueeze(0).to(dtype=torch.bfloat16, device="cpu")
-            return model.tiled_encode(batched, device, tile_size, tile_stride)
-        batched = video.unsqueeze(0).to(dtype=torch.bfloat16, device=device)
-        return model.encode_view(batched)
+        tile_size = tuple(
+            size * model.upsampling_factor for size in self.execution.vae_tile_size
+        )
+        tile_stride = tuple(
+            stride * model.upsampling_factor for stride in self.execution.vae_tile_stride
+        )
+        batched = video.unsqueeze(0).to(dtype=torch.bfloat16, device="cpu")
+        return model.tiled_encode(batched, device, tile_size, tile_stride)
 
     def _decode_view(self, model: WanVideoVAE38, latent: Tensor, device: str) -> Tensor:
         import torch
 
-        if self.execution.tiled_vae:
-            batched = latent.unsqueeze(0).to(dtype=torch.bfloat16, device="cpu")
-            return model.tiled_decode(
-                batched,
-                device,
-                self.execution.vae_decode_tile_size or self.execution.vae_tile_size,
-                self.execution.vae_decode_tile_stride or self.execution.vae_tile_stride,
-            )
-        batched = latent.unsqueeze(0).to(dtype=torch.bfloat16, device=device)
-        return model.decode_view(batched)
+        batched = latent.unsqueeze(0).to(dtype=torch.float16, device="cpu")
+        return model.tiled_decode(
+            batched,
+            device,
+            self.execution.vae_decode_tile_size,
+            self.execution.vae_decode_tile_stride,
+        )
 
     def encode(self, videos: Tensor) -> Tensor:
         """Encode CPU-resident views and gather latents by input index."""
@@ -265,7 +245,7 @@ class VaeExecutor:
         def operation(
             model: WanVideoVAE38, device: str, indices: tuple[int, ...], stopped: Event
         ) -> None:
-            with torch.inference_mode(), _bf16_autocast():
+            with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
                 for index in indices:
                     if stopped.is_set():
                         return
@@ -281,9 +261,7 @@ class VaeExecutor:
     def _decode_and_publish(
         self,
         latents: Tensor,
-        sink: Callable[[int, _DecodedView], Output],
-        *,
-        retain_video: bool,
+        sink: Callable[[int, tuple[np.ndarray, ...]], Output],
     ) -> tuple[Output, ...]:
         import torch
 
@@ -312,25 +290,19 @@ class VaeExecutor:
                 indices: tuple[int, ...],
                 worker_stop: Event,
             ) -> None:
-                with torch.inference_mode(), _bf16_autocast():
+                with torch.inference_mode(), torch.autocast("cuda", dtype=torch.float16):
                     for index in indices:
                         if worker_stop.is_set():
                             return
                         slots.acquire()
                         try:
                             decoded = self._decode_view(model, latents[index], device)
-                            device_video = decoded[0].detach()
-                            rgb_frames = _rgb_frames(device_video)
-                            video = (
-                                device_video.to(device="cpu").contiguous()
-                                if retain_video
-                                else None
-                            )
-                            del decoded, device_video
+                            rgb_frames = _rgb_frames(decoded[0])
+                            del decoded
                             future = codec_pool.submit(
                                 sink,
                                 index,
-                                _DecodedView(video=video, rgb_frames=rgb_frames),
+                                rgb_frames,
                             )
                             future.add_done_callback(release_slot)
                             sink_futures[index] = future
@@ -369,14 +341,12 @@ class VaeExecutor:
         frame_root.mkdir(parents=True, exist_ok=False)
         video_root.mkdir(parents=True, exist_ok=False)
 
-        def publish(index: int, decoded: _DecodedView) -> tuple[Path, Path]:
+        def publish(index: int, frames: tuple[np.ndarray, ...]) -> tuple[Path, Path]:
             camera_id = camera_ids[index]
             LOGGER.info("Publishing RCP camera %02d", camera_id)
-            if decoded.video is None:
-                raise RuntimeError("RCP publication requires the decoded BF16 video.")
-            frame_dir = _save_jpegs(decoded.video, camera_id, frame_root)
+            frame_dir = _save_jpegs(frames, camera_id, frame_root)
             video_path = write_video(
-                iter(decoded.rgb_frames),
+                iter(frames),
                 video_root / f"{camera_id:02d}.mp4",
                 clip.fps,
                 crf=INFERENCE.target_h264_crf,
@@ -384,7 +354,7 @@ class VaeExecutor:
             )
             return frame_dir, video_path
 
-        published = self._decode_and_publish(latents, publish, retain_video=True)
+        published = self._decode_and_publish(latents, publish)
         return PublishedRcp(
             frame_directories=tuple(item[0] for item in published),
             videos=tuple(item[1] for item in published),
@@ -396,10 +366,10 @@ class VaeExecutor:
         video_root = output_dir / "videos"
         video_root.mkdir(parents=True, exist_ok=False)
 
-        def publish(camera_id: int, decoded: _DecodedView) -> Path:
+        def publish(camera_id: int, frames: tuple[np.ndarray, ...]) -> Path:
             LOGGER.info("Publishing target camera %02d", camera_id)
             return write_video(
-                iter(decoded.rgb_frames),
+                iter(frames),
                 video_root / f"{camera_id:02d}.mp4",
                 clip.fps,
                 crf=INFERENCE.target_h264_crf,
@@ -407,7 +377,7 @@ class VaeExecutor:
                 lossless_rgb=self.execution.lossless_target_video,
             )
 
-        return self._decode_and_publish(latents, publish, retain_video=False)
+        return self._decode_and_publish(latents, publish)
 
     def release_replicas(self) -> None:
         """Keep one fresh CPU model while releasing stage-local replicas.

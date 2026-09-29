@@ -148,7 +148,8 @@ def load_pose_encoder(checkpoint_path: str | Path, device: str):
     return pose_encoder.to(device=device, dtype=torch.bfloat16).eval().requires_grad_(False)
 
 
-def _load_vae(path: Path, dtype):
+def load_vae(path: str | Path):
+    """Load BF16 encoding and FP16 decoding directly from the original weights."""
     import torch
 
     from fdanyone.vendor.diffsynth.models.wan_video_vae import WanVideoVAE38
@@ -162,15 +163,13 @@ def _load_vae(path: Path, dtype):
     # These tensors are derived attributes, not checkpoint entries. Recreate
     # them after strict assignment because construction happened on ``meta``.
     vae.materialize_normalization(device="cpu")
-    return vae.to(dtype=dtype).eval().requires_grad_(False)
-
-
-def load_vae(path: str | Path):
-    """Load the frozen Wan VAE as an independent generation stage."""
-
-    import torch
-
-    return _load_vae(Path(path), torch.bfloat16)
+    # Casting the whole VAE to BF16 first would irreversibly round the decoder
+    # weights before FP16 conversion. Keep the two stages independent.
+    vae.model.encoder.to(dtype=torch.bfloat16)
+    vae.model.conv1.to(dtype=torch.bfloat16)
+    vae.model.decoder.to(dtype=torch.float16)
+    vae.model.conv2.to(dtype=torch.float16)
+    return vae.eval().requires_grad_(False)
 
 
 def load_denoiser(

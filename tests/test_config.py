@@ -23,7 +23,7 @@ class ExecutionProfileTests(unittest.TestCase):
         self.assertEqual(profile.pose_encoder_worker_limit, 1)
         self.assertTrue(profile.cuda_expandable_segments)
         self.assertEqual(profile.cuda_garbage_collection_threshold, 0.70)
-        self.assertTrue(profile.tiled_vae)
+        self.assertTrue(profile.to_dict()["tiled_vae"])
         self.assertEqual(profile.process_vram_limit_bytes, 23 * 2**30)
 
     def test_retired_profiles_are_rejected(self) -> None:
@@ -38,7 +38,9 @@ class ExecutionProfileTests(unittest.TestCase):
         self.assertEqual(profile.latent_accumulation_dtype, "float32")
         self.assertTrue(profile.lossless_target_video)
         self.assertEqual(profile.target_video_preset, "veryfast")
-        self.assertTrue(profile.tiled_vae)
+        self.assertEqual(profile.to_dict()["vae_encoder_dtype"], "bfloat16")
+        self.assertEqual(profile.to_dict()["vae_decoder_dtype"], "float16")
+        self.assertEqual(profile.to_dict()["vae_rgb_conversion"], "round_to_nearest_uint8")
         self.assertEqual(profile.vae_tile_size, INFERENCE.vae_tile_size)
         self.assertEqual(profile.vae_decode_tile_size, (52, 44))
         self.assertEqual(profile.vae_decode_tile_stride, (28, 44))

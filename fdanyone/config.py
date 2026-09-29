@@ -35,7 +35,6 @@ class InferenceConfig:
     num_inference_steps: int = 24
     denoising_strength: float = 1.0
     scheduler_shift: float = 5.0
-    tiled_vae: bool = False
     vae_tile_size: tuple[int, int] = (52, 30)
     vae_tile_stride: tuple[int, int] = (26, 15)
 
@@ -54,9 +53,10 @@ class ExecutionProfile:
     dit_attention_batch_limit: int | None
     dit_ffn_chunk_views: int | None
     latent_accumulation_dtype: str
-    tiled_vae: bool
     vae_tile_size: tuple[int, int]
     vae_tile_stride: tuple[int, int]
+    vae_decode_tile_size: tuple[int, int]
+    vae_decode_tile_stride: tuple[int, int]
     lossless_target_video: bool
     target_video_preset: str
     cuda_max_split_size_mb: int
@@ -65,9 +65,6 @@ class ExecutionProfile:
     process_vram_target_bytes: int | None
     process_vram_limit_bytes: int | None
 
-    # Decode-only overrides keep source/reference encoding unchanged.
-    vae_decode_tile_size: tuple[int, int] | None = None
-    vae_decode_tile_stride: tuple[int, int] | None = None
     compile_dit: bool = False
 
     def to_dict(self) -> dict[str, object]:
@@ -81,11 +78,14 @@ class ExecutionProfile:
             "dit_attention_batch_limit": self.dit_attention_batch_limit,
             "dit_ffn_chunk_views": self.dit_ffn_chunk_views,
             "latent_accumulation_dtype": self.latent_accumulation_dtype,
-            "tiled_vae": self.tiled_vae,
+            "tiled_vae": True,
+            "vae_encoder_dtype": "bfloat16",
+            "vae_decoder_dtype": "float16",
+            "vae_rgb_conversion": "round_to_nearest_uint8",
             "vae_tile_size": list(self.vae_tile_size),
             "vae_tile_stride": list(self.vae_tile_stride),
-            "vae_decode_tile_size": list(self.vae_decode_tile_size or self.vae_tile_size),
-            "vae_decode_tile_stride": list(self.vae_decode_tile_stride or self.vae_tile_stride),
+            "vae_decode_tile_size": list(self.vae_decode_tile_size),
+            "vae_decode_tile_stride": list(self.vae_decode_tile_stride),
             "lossless_target_video": self.lossless_target_video,
             "target_video_preset": self.target_video_preset,
             "cuda_max_split_size_mb": self.cuda_max_split_size_mb,
@@ -171,7 +171,6 @@ FULL_EXECUTION = ExecutionProfile(
     # Euler state is kept in FP32 so rounding error does not accumulate across
     # all 24 scheduler updates.
     latent_accumulation_dtype="float32",
-    tiled_vae=True,
     vae_tile_size=INFERENCE.vae_tile_size,
     vae_tile_stride=INFERENCE.vae_tile_stride,
     # Preserve the decoder's final uint8 RGB values instead of introducing a

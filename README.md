@@ -23,7 +23,7 @@ Generate synchronized multi-view videos from one person's input video using **SA
 
 Choose calibrated multi-view videos or a trained foreground 4D Gaussian scene. Each chunk generates and trains independently; scenes are not stitched across chunks. Expanded Turbo layouts and reconstruction quality remain experimental.
 
-The default `full` mode keeps BF16 model weights, FP32 denoising state and lossless RGB output under a **23 GiB per-process limit**. SageAttention, bounded attention compilation, CPU thread budgeting and persistent GPU workers are enabled by default on the validated L40S setup. There is no tiny-VAE or FP8 path.
+The default `full` mode uses BF16 denoising and source encoding, FP32 denoising state, and the full Wan VAE decoder in **FP16 with rounded RGB output**, under a **23 GiB per-process limit**. SageAttention, bounded attention compilation, CPU thread budgeting and persistent GPU workers are enabled by default on the validated L40S setup. The decoder has one fixed production path.
 
 ## Setup
 
@@ -112,7 +112,7 @@ Each result contains `metadata.json`, `cameras.json`, preprocessing geometry, sk
 | Six views, one L40S | 7m03s | 20.71 GiB |
 | 24 cameras, seven L40S GPUs available | 7m26s | 21.21 GiB |
 
-These are generation-only runs, not throughput guarantees; they exclude foreground dataset preparation and 4DGS training. Full-VAE decoding remains the largest single-GPU generation stage. See [performance and validation limits](docs/performance.md) and [training](docs/training.md).
+These historical generation runs used the previous BF16 decoder; they exclude foreground dataset preparation and 4DGS training. The integrated FP16/rounded decoder measured **40.28 seconds for six camera videos on six L40S GPUs**, including worker startup and lossless export, at **15.42 GiB per GPU**. These are individual measurements, not throughput guarantees. See [performance and validation limits](docs/performance.md) and [training](docs/training.md).
 
 ## Maintenance
 

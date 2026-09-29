@@ -1,6 +1,6 @@
 # Performance and execution defaults
 
-The `full` profile uses SAM 3D Body + BiRefNet, four-step Turbo, BF16 model weights, FP32 denoising state, the full Wan VAE and lossless RGB output. The process VRAM limit is 23 GiB. `quality` remains a compatibility alias.
+The `full` profile uses SAM 3D Body + BiRefNet, four-step Turbo, BF16 denoising and source encoding, FP32 denoising state, and full Wan VAE decoding in FP16 with rounded RGB output. The process VRAM limit is 23 GiB. `quality` remains a compatibility alias.
 
 ## Enabled optimizations
 
@@ -9,13 +9,20 @@ The `full` profile uses SAM 3D Body + BiRefNet, four-step Turbo, BF16 model weig
 - Up to eight CPU threads per worker, divided across available CPU affinity. Explicit OMP/MKL thread limits take precedence.
 - One persistent batch worker per GPU, caching the denoiser in CPU memory between jobs and reusing compiled attention. Failed jobs restart their worker. See [GPU queues](multi_stream.md).
 - GPU BiRefNet preprocessing and validated SAM 3D Body TensorRT FP16 engines when available; CUDA ONNX Runtime is the automatic fallback.
-- Full-VAE decode tiles of size `(52,44)` and stride `(28,44)`, in isolated GPU subprocesses. Source encoding retains its original tiling. Camera order is restored after distributed decoding.
+- Full-VAE FP16 decode tiles of size `(52,44)` and stride `(28,44)`, in isolated GPU subprocesses. Original checkpoint weights are cast directly to FP16; source encoding retains BF16 and its original tiling. Camera order is restored after distributed decoding.
+- Decoded RGB is rounded to the nearest integer and saved losslessly. Non-finite pixels fail before export. Reference JPEGs and target videos share this conversion.
 
-No tiny VAE, FP8 model path or whole-block compilation is enabled.
+There are no alternate decoder precision or untiled execution modes. Tiny VAE, FP8 and whole-block compilation are absent.
+
+## Decoder validation
+
+The integrated production path decoded and published six 121-frame, 704×1280 videos on six L40S GPUs in **40.28 s**, including shard serialization, isolated worker startup, model loading and lossless export. Peak process VRAM was **15.42 GiB per GPU**. The earlier controlled FP16 comparison took 40.15 s versus 38.99 s for BF16, excluding shard serialization. These are single measured runs; source encoding, denoising and reconstruction are excluded.
+
+In a fixed-input comparison, uploaded-source round-trip PSNR increased from 36.818 to 36.949 dB. Mean foreground PSNR on two generated-view round trips increased from 35.882 to 36.154 dB. Average SSIM and LPIPS also improved; the visual gain is subtle. No downstream 4DGS improvement has been measured. Production publication passed the 23 GiB guard and matched the selected experiment pixel-for-pixel across all six cameras and 726 frames. Source latents were unchanged; reference JPEG publication and BF16 re-encoding also passed.
 
 ## Measured complete runs
 
-These measurements use 121 frames per camera at 704×1280 and 25 FPS, with the full VAE and eight CPU threads per worker.
+These historical measurements use 121 frames per camera at 704×1280 and 25 FPS, with the previous BF16 full-VAE decoder and eight CPU threads per worker. They have not been remeasured end to end with FP16 decoding.
 
 | Run | GPU allocation | Complete pipeline | Denoising stage | Decode/publication | Peak process VRAM |
 |---|---|---:|---:|---:|---:|

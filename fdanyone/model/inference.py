@@ -702,17 +702,13 @@ def generate_views(
                 vae.devices = decode_devices
             target_root = root / "target"
             target_root.mkdir()
-            if execution.vae_decode_tile_size is not None:
-                # A fresh process avoids retaining encoder/DiT CUDA workspace
-                # allocations during the wider full-VAE decode.
-                from fdanyone.model.decode_worker import publish_isolated
-                vae.close()
-                _empty_cuda_cache()
-                LOGGER.info("Decoding full VAE in a fresh process on %s", ", ".join(decode_devices))
-                target_videos, vae.last_peak_vram_bytes = publish_isolated(
-                    target_latents, assets.vae, target_root, clip.fps, decode_devices, execution)
-            else:
-                target_videos = vae.publish_targets(target_latents, target_root, clip)
+            # Fresh processes release encoder/DiT CUDA workspaces before decode.
+            from fdanyone.model.decode_worker import publish_isolated
+            vae.close()
+            _empty_cuda_cache()
+            LOGGER.info("Decoding full FP16 VAE in fresh processes on %s", ", ".join(decode_devices))
+            target_videos, vae.last_peak_vram_bytes = publish_isolated(
+                target_latents, assets.vae, target_root, clip.fps, decode_devices, execution)
         _merge_view_stage_peak(metrics, "target_decode_and_publish", vae)
 
         result = GeneratedViews(
