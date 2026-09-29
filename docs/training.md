@@ -205,3 +205,66 @@ not guarantee perfect geometry or recover the scene background.
 
 FreeTimeGsVanilla retains its [AGPL license](../third_party/FreeTimeGsVanilla/LICENSE).
 Generation model terms remain in the [third-party notices](THIRD_PARTY_NOTICES.md).
+
+## Recipe decisions
+
+Reusable training policy belongs in FreeTimeGsVanilla. This project owns SAM
+mesh initialization, generated-camera calibration, BiRefNet masks, job execution,
+previews, audio and TSOG publication. The trainer now supports frame-based
+duration bounds, temporal freezing, foreground MSE, staged learning rates and
+LPIPS frequency through its [training policy API](../third_party/FreeTimeGsVanilla/README.md#training-policy).
+Live and final exports forward the trainer's resolved bounds. Training status
+hashes include the policy and exporter sources.
+
+The first changes address correctness and repeatability: a configured temporal
+width must survive checkpoint loading and export, and restarting a run must
+preserve its optimization policy. New checkpoints retain Adam state, allocation
+statistics, random state, iteration sampling and the original learning-rate
+horizon. A polishing phase can lower learning rates, freeze temporal widths,
+and stop relocation while preserving Adam momentum. Starting fresh Adam is an
+explicit fine-tuning operation. Legacy checkpoints cannot recover state they
+did not store.
+
+The preferred candidate for further quality validation is the **balanced**
+recipe: anchored temporal centers with learned velocity, compatible frame-based
+seed coverage, foreground MSE weight 1, full alpha supervision, SH3, dense LPIPS
+during fitting, then smaller learning rates and frozen widths for polishing.
+Contribution-based pruning and LPIPS every fourth update are candidates only
+after the scene is mature. Retaining optimizer momentum across phases is now
+supported and checked for continuity, but its quality advantage over the
+experimental fresh-Adam transitions has not been measured.
+
+The short-window ablations used 13 frames and all 18 generated cameras, with
+warm starts from earlier trained checkpoints. Mature pruning from 2.08M to
+1.04M points plus another 4k updates reached 32.282 dB native / 30.960 dB decoded
+TSOG, improving the tracked metrics over the prior saved model. Doubling
+foreground MSE only during polishing reached 32.712 / 31.293 dB, with slightly
+worse silhouette and SSIM than the balanced variant. The balanced recipe is
+the preferred candidate when preserving overall quality. These scores and
+additional refinement times do not establish fresh-training performance.
+
+The full-clip default remains the documented 30k-step mesh-initialized recipe.
+The experimental sigma bounds of 0.5–2 frames and dense temporal allocation
+must be tested together: setting narrow widths on the existing five-frame
+keyframe initialization can reduce intermediate-frame coverage. Hybrid body
+and multi-view foreground initialization, automatic pruning budgets and
+plateau-based phase transitions require further controlled ablations before
+production adoption. Point counts from a 13-frame fit should not simply be
+multiplied across all 121 frames.
+
+Validation of the policy implementation includes physical-time invariance
+between 13- and 121-frame clocks, subframe checkpoint/export/viewer agreement,
+empty-mask loss handling, phase freezing and retained momentum. A synthetic
+CUDA integration run also compares uninterrupted training with resumed and
+extended training. This validates the implementation; it is not a new quality
+benchmark for the generated videos.
+
+The checks passed 49 trainer tests, 17 pipeline reconstruction tests and 11
+player model tests. CPU continuation matched exactly. A CUDA restart during
+polishing differed by at most 1.13e-6 in model parameters. During active
+relocation, a strict raw-parameter gate of 1e-4 failed; the resulting rendered
+RGB and alpha differed by at most 1.62e-4 and 2.20e-4 across all 14 synthetic
+camera/frame pairs, below one 8-bit input level. This rendered difference was
+smaller than that between two uninterrupted same-seed runs. CUDA continuation
+is therefore checked by rendered behavior as well as state restoration, without
+claiming bitwise reproducibility.

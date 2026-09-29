@@ -109,7 +109,8 @@ def train_result(result_dir, *, model_dir='models', output_dir=None, gpu_id=0,
     # Record exact sources, including any local changes to the pinned trainer.
     source_hashes = {name: hashlib.sha256((REPO/name).read_bytes()).hexdigest() for name in (
         'src/simple_trainer_freetime_4d_pure_relocation.py', 'src/foreground_loss.py',
-        'datasets/FreeTime_dataset.py', 'src/freetime_ops.py')}
+        'datasets/FreeTime_dataset.py', 'src/freetime_ops.py', 'src/training_policy.py',
+        'src/export_ftgs_ply.py', 'src/init_common.py')}
     output.mkdir(parents=True)
     status_path = output/'status.json'
     started = time.monotonic()

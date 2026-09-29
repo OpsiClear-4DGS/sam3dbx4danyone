@@ -73,8 +73,8 @@ def config_for(stage, values):
             raise ValueError('Camera counts, angles and seed must be integers.')
         make_options(config['views'], config['pitches'], config['yaw'], config['span'], config['turbo'], 0., 'auto', config['seed'])
     elif stage == 'splat':
-        if type(config['steps']) is not int or not 1 <= config['steps'] <= 100000:
-            raise ValueError('Training steps must be between 1 and 100,000.')
+        if type(config['steps']) is not int or not 1 <= config['steps'] <= 200000:
+            raise ValueError('Training steps must be between 1 and 200,000.')
         if type(config['samples_per_keyframe']) is not int or not 4 <= config['samples_per_keyframe'] <= 131072:
             raise ValueError('Samples per keyframe must be between 4 and 131,072.')
     return config

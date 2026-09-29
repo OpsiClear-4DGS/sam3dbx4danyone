@@ -28,7 +28,7 @@ ssh -N -L 8080:127.0.0.1:8080 user@gpu-host
 | Trim | Range and speed, 1×–4× | Lossless 121-frame chunks and matching audio |
 | Extract pose | FP16 or FP32 | SAM body parameters, mesh and BiRefNet masks |
 | Generate videos | Cameras, Turbo/Base and seed | Calibrated multiview videos |
-| Splat 4DGS | Training steps and points per keyframe | Training snapshots and final TSOG |
+| Splat 4DGS | Training steps (up to 200,000) and points per keyframe | Training snapshots and final TSOG |
 
 Select any step to inspect or configure it. **Run through** chooses the last step
 to execute: select the same step to run it alone, or a later step to continue the

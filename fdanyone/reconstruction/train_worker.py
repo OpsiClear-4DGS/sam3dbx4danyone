@@ -33,8 +33,8 @@ def main():
     from gsplat.strategy import DefaultStrategy
 
     if request.get('check'):
-        if 'alpha_mode' not in trainer.Config.__dataclass_fields__ or 'lambda_alpha' not in trainer.Config.__dataclass_fields__:
-            raise RuntimeError('Update FreeTimeGsVanilla: this bridge requires transparent RGBA training support.')
+        if not {'alpha_mode', 'lambda_alpha', 'min_duration_frames', 'phases'}.issubset(trainer.Config.__dataclass_fields__):
+            raise RuntimeError('Update FreeTimeGsVanilla: this bridge requires RGBA training and temporal duration metadata.')
         if not torch.cuda.is_available():
             raise RuntimeError('FreeTimeGS requires a visible CUDA GPU.')
         print(json.dumps({'python': sys.version.split()[0], 'torch': torch.__version__, 'numpy': np.__version__}))
@@ -93,7 +93,8 @@ def main():
     original_writer = runner.writer
     publisher = PreviewPublisher(output, request['status'],
         lambda path: save_ftgs_ply(path, runner.splats,
-            use_velocity=cfg.use_velocity, n_frames=manifest['frames']))
+            use_velocity=cfg.use_velocity, n_frames=manifest['frames'],
+            min_duration=runner.duration_bounds[0], max_duration=runner.duration_bounds[1]))
     class ProgressWriter:
         def __getattr__(self, name):
             return getattr(original_writer, name)
@@ -115,7 +116,8 @@ def main():
         # Upstream catches optional export failures. Perform the required model
         # export here so a failed export cannot be reported as a completed job.
         save_ftgs_ply(output/'scene.ftgs.ply', runner.splats,
-                      use_velocity=cfg.use_velocity, n_frames=manifest['frames'])
+                      use_velocity=cfg.use_velocity, n_frames=manifest['frames'],
+                      min_duration=runner.duration_bounds[0], max_duration=runner.duration_bounds[1])
     finally:
         original_writer.close()
 
